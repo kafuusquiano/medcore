@@ -1,0 +1,23 @@
+# ============================================================
+# eureka-server — perfil local (desarrollo en la laptop).
+# ============================================================
+
+eureka:
+  instance:
+    hostname: localhost
+  server:
+    # Desactivado en desarrollo: con pocas instancias y reinicios frecuentes,
+    # el modo de autoproteccion impide que Eureka expulse servicios caidos y
+    # el dashboard queda mostrando instancias que ya no existen.
+    enable-self-preservation: false
+    # Refresco rapido del registro para notar enseguida que un servicio subio.
+    response-cache-update-interval-ms: 3000
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.netflix.eureka: INFO

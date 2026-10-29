@@ -1,0 +1,46 @@
+# ============================================================
+# eureka-server — configuracion comun a todos los perfiles.
+# Lo especifico de cada entorno vive en application-local.yml
+# y application-prod.yml.
+# ============================================================
+
+spring:
+  application:
+    name: eureka-server
+  profiles:
+    default: local
+
+server:
+  port: ${SERVER_PORT:8761}
+
+eureka:
+  instance:
+    hostname: ${EUREKA_HOSTNAME:localhost}
+    prefer-ip-address: false
+  server:
+    # Expulsa de la lista a las instancias que dejan de enviar heartbeat.
+    eviction-interval-timer-in-ms: 15000
+    # Tiempo de espera inicial antes de empezar a servir el registro.
+    wait-time-in-ms-when-sync-empty: 0
+  client:
+    # El servidor de registro no se registra en si mismo ni consume el registro.
+    register-with-eureka: false
+    fetch-registry: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    # El healthcheck de Docker apunta aqui (MC2).
+    probes:
+      enabled: true
+
+logging:
+  level:
+    com.netflix.eureka: INFO
+    com.netflix.discovery: INFO

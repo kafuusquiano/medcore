@@ -1,0 +1,30 @@
+# ============================================================
+# eureka-server — perfil prod.
+#
+# En el despliegue hibrido de MedCore "produccion" es el mismo
+# docker-compose corriendo en la laptop, expuesto por el tunel.
+# El hostname se toma de variable de entorno porque dentro de la
+# red de Compose los servicios se resuelven por nombre de contenedor.
+# ============================================================
+
+eureka:
+  instance:
+    hostname: ${EUREKA_HOSTNAME:eureka-server}
+    prefer-ip-address: true
+  server:
+    # Activado: en un entorno estable, la autoproteccion evita que un corte
+    # de red momentaneo vacie el registro y tumbe el enrutamiento del gateway.
+    enable-self-preservation: true
+    response-cache-update-interval-ms: 30000
+
+management:
+  endpoint:
+    health:
+      # No se exponen detalles de salud fuera de desarrollo.
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    com.netflix.eureka: WARN
+    com.netflix.discovery: WARN
