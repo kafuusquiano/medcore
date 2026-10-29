@@ -1,0 +1,262 @@
+================================================================================
+MEDCORE - BITACORA DE AVANCE
+Sistema Integral de Gestion Clinica y Analitica
+Repositorio: https://github.com/kafuusquiano/medcore
+================================================================================
+
+Este archivo registra lo que se avanza en cada sesion de trabajo: que se hizo,
+que se decidio y por que, y que quedo pendiente. Se actualiza al final de cada
+sesion y se versiona junto al codigo.
+
+
+================================================================================
+SESION 01  -  28 y 29 de octubre de 2026
+Objetivo: preparar el entorno de desarrollo y la base del repositorio.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. ANALISIS DEL ESTADO INICIAL
+--------------------------------------------------------------------------------
+
+Se reviso la carpeta del proyecto contra la guia guia-claude-code-medcore.docx.
+
+Hallazgo: de 566 archivos, solo 8 tenian contenido. Todo el arbol (323 .java,
+12 pom.xml, 36 application*.yml, 11 Dockerfile, docker-compose, Makefile, los
+10 docs/*.md, los seeds SQL y los 4 workflows) estaba en 0 bytes. El scaffold
+de carpetas existia y coincidia con la seccion 3.1 de la guia, pero no habia
+nada implementado. La Fase 1 estaba al 0%.
+
+Tampoco habia repositorio git inicializado localmente.
+
+
+--------------------------------------------------------------------------------
+2. DECISIONES DE ARQUITECTURA Y DESPLIEGUE
+--------------------------------------------------------------------------------
+
+2.1 Monorepo, no multirepo
+    Se mantiene un unico repositorio para backend, frontend y movil.
+    Razon: microservicios exige independencia de despliegue y de base de datos,
+    no de repositorio. Separar en 11 repos obligaria a publicar medcore-commons
+    como artefacto versionado en un registry y a bumpear 11 poms por cada cambio,
+    ademas de 14 pipelines y 14 juegos de secretos.
+
+2.2 Sin repositorio medcore-config
+    La guia pedia un repo privado aparte que el Config Server clonara en
+    produccion. Se descarta.
+    Razon: el Config Server corre siempre en modo native leyendo
+    infra/config-repo/ desde disco. Esto elimina el token de GitHub, su
+    expiracion, y un modo de falla el dia de la demostracion. Un solo repo.
+
+2.3 Despliegue hibrido: backend local + frontend en Vercel
+    Se evaluo Render para el backend y se descarto.
+    Razon: el plan gratuito da 512 MB de RAM y 0.1 CPU por instancia, suspende
+    tras 15 minutos sin trafico (lo que desregistra los servicios de Eureka), su
+    Postgres gratuito expira a los 30 dias, y los Features on Demand de Kafka
+    gratuitos ya no existen (Upstash Kafka discontinuado; Aiven free solo
+    permite 5 topicos y el proyecto necesita 9).
+
+    Modelo adoptado:
+      [Navegador] --HTTPS--> [Vercel: medcore-frontend]
+                                   |  VITE_API_BASE_URL
+                                   v
+                          [ngrok: dominio estatico]
+                                   |
+                                   v
+                 [laptop: docker compose, solo :8080 expuesto]
+
+    Ventajas: se recuperan Eureka y Config Server (la arquitectura completa de
+    la guia queda demostrable), Kafka KRaft local con los 9 topicos, las 7 bases
+    Postgres locales, sin limites de RAM ni arranques en frio.
+
+    Reglas del despliegue:
+      - Por el tunel se expone UNICAMENTE el 8080 del gateway.
+        Nunca 8761, 5432, 27017 ni 9092.
+      - El dominio de ngrok debe ser estatico y reservado: la URL se compila
+        dentro del build de Vercel y dentro del APK.
+      - En dominios gratuitos ngrok devuelve una pagina intersticial a los
+        user-agent de navegador. El cliente HTTP debe enviar la cabecera
+        ngrok-skip-browser-warning: true, o recibe HTML en vez de JSON.
+      - CORS en el gateway con allowed-origins: ${FRONTEND_ORIGIN}.
+      - JWT_SECRET de produccion con openssl rand -base64 64.
+
+2.4 Versiones de Spring (verificadas en repo1.maven.org)
+    Se descarto Spring Boot 4.1.1 pese a ser estable.
+    Razon: ningun tren estable de Spring Cloud apunta a Boot 4.1.x.
+      Spring Cloud 2025.1.4    -> spring-boot.version 4.0.9
+      Spring Cloud 2026.0.0-RC1 -> spring-boot.version 4.2.0-RC1
+    Como la arquitectura depende de Eureka, Config Server, Gateway y OpenFeign,
+    manda el tren de Spring Cloud.
+
+    Adoptado:  Spring Boot 4.0.9 + Spring Cloud 2025.1.4
+      spring-cloud-netflix        5.0.3  (Eureka server y client)
+      spring-cloud-config         5.0.6
+      spring-cloud-gateway        5.0.4
+      spring-cloud-openfeign      5.0.4
+      spring-cloud-circuitbreaker 5.0.3
+
+    IMPORTANTE: el starter del gateway se renombro en la rama 5.x.
+      Correcto:   spring-cloud-starter-gateway-server-webflux
+      Ya no existe: spring-cloud-starter-gateway
+
+2.5 Sin CLAUDE.md
+    Las convenciones del proyecto viven en README.md.
+
+
+--------------------------------------------------------------------------------
+3. ENTORNO DE DESARROLLO
+--------------------------------------------------------------------------------
+
+Equipo: HP Laptop 15-dy5xxx, i7-1255U, 12 nucleos logicos, 31.7 GB RAM,
+Windows 11 Pro 26H2.
+
+Ya presentes: Java 21.0.10 LTS, Maven 3.9.16, Node 22.23.3, npm 10.9.9,
+Git 2.53.0, ngrok 3.39.11.
+
+3.1 Instalacion de WSL2 y Docker - problema y solucion
+    wsl --install dejaba WSL2 sin arrancar: "la virtualizacion no esta
+    habilitada". La caracteristica VirtualMachinePlatform estaba en
+    InstallState=2 y su payload NO estaba en WinSxS; se habia borrado meses
+    antes al deshabilitar la caracteristica y limpiar residuos.
+
+    Windows la trata como Feature on Demand
+    (Windows.HyperV.OptionalFeature.VirtualMachinePlatform.Client.Disabled),
+    por lo que NO esta dentro del install.wim de ninguna ISO normal: solo
+    llega desde Windows Update o desde el FoD ISO de licenciamiento por volumen.
+
+    Intentos que fallaron:
+      - dism /enable-feature            -> bucle de descarga 50/100 <-> 0/100
+      - optionalfeatures.exe            -> 0x800f0842 CBS_E_SESSION_FINALIZED
+      - dism con /LimitAccess           -> 0x800f0912 (sin origen local)
+      - dism con /Source:WIM desde ISO  -> 0x800f0912 (los FoD no van en el wim)
+      - reset de SoftwareDistribution   -> 0x80072EE2 ERROR_INTERNET_TIMEOUT
+
+    Diagnostico intermedio: sfc /scannow sin infracciones y
+    dism /cleanup-image /restorehealth correcto, o sea que el sistema estaba
+    sano; el problema era la entrega del payload.
+
+    SOLUCION: instalar las actualizaciones pendientes de Windows Update. El
+    equipo paso de build 26300.9711 a 26300.9818 y con esa build el payload si
+    estaba disponible. VirtualMachinePlatform quedo en InstallState=1.
+
+    Despues: wsl --install -d Ubuntu (WSL2, usuario kafu_usquiano) y
+    winget install -e --id Docker.DockerDesktop (Docker Desktop 4.97.0).
+
+    Verificado:
+      Docker 29.9.2, Docker Compose v5.6.1, hello-world OK
+      Motor con 8 CPUs y 15.62 GiB (limite fijado en C:\Users\kafuu\.wslconfig)
+
+3.2 Limpieza
+    Se liberaron ~9.5 GB: ISO de evaluacion de Windows (7.66 GB), carpeta
+    C:\UUP con un set UUP inservible (5.26 GB, se habia elegido un paquete de
+    solo actualizaciones) y C:\Windows\SoftwareDistribution.old (4.21 GB).
+
+    NO se toco C:\Windows\Installer (11.29 GB): son los paquetes MSI que
+    Windows necesita para reparar y desinstalar programas.
+
+3.3 Servicios nativos que estorban  [PENDIENTE DE EJECUTAR]
+    PostgreSQL 18 y MongoDB estan instalados como servicios de Windows en
+    arranque automatico. Postgres nativo tiene tomado 0.0.0.0:5432 y mongod no
+    logra enlazar 27017, por lo que localhost:5432 responde el Postgres NATIVO,
+    no el contenedor. Se comprobo: el error de autenticacion llego en espanol,
+    y el contenedor corre en ingles.
+
+    Accion pendiente, en PowerShell como administrador:
+      Stop-Service MongoDB, postgresql-x64-18
+      Set-Service MongoDB -StartupType Manual
+      Set-Service postgresql-x64-18 -StartupType Manual
+
+
+--------------------------------------------------------------------------------
+4. REPOSITORIO
+--------------------------------------------------------------------------------
+
+El repositorio de GitHub ya existia con 5 commits de una sesion anterior. La
+carpeta local no tenia git, y al clonar quedo un repo anidado en medcore/.
+
+Resolucion: se adopto la historia de GitHub (git reset --mixed origin/main) y
+se recommitearon encima solo los cambios reales. No se perdio ningun commit.
+Se elimino el clon duplicado.
+
+Commits de esta sesion:
+  4fa1644  docs: README con arquitectura y convenciones del proyecto
+  bf00fd4  feat(infra): compose de infraestructura y scripts de inicializacion
+  2852a60  chore: .gitattributes para normalizar fin de linea
+
+Ramas main y develop sincronizadas con origin.
+
+4.1 .gitignore
+    Se agrego target/, build/, .expo/, *.apk, *.aab, *.iso, desktop.ini y
+    Thumbs.db. Se mantuvo *.jar pero con excepcion para maven-wrapper.jar, que
+    la plantilla original habria ignorado por error.
+
+4.2 .gitattributes
+    Necesario en Windows: sin el, un clon nuevo entrega create-topics.sh con
+    CRLF y bash falla con "bad interpreter". Fuerza LF en .sh, .sql, .yml,
+    Dockerfile y mvnw, CRLF en .cmd y .bat, y marca los binarios.
+
+4.3 README.md  (339 lineas)
+    Arquitectura, tabla de los 11 servicios con puertos y bases, los 9 topicos
+    Kafka, estructura del monorepo, convenciones G1-G7, reglas MC1-MC7, entorno
+    local, modelo de despliegue hibrido y politica de ramas.
+
+
+--------------------------------------------------------------------------------
+5. INFRAESTRUCTURA LEVANTADA Y VERIFICADA
+--------------------------------------------------------------------------------
+
+docker-compose.infra.yml, para desarrollar los microservicios desde el IDE:
+
+  medcore-postgres   postgres:16.6-alpine          healthy   5432
+  medcore-mongodb    mongo:7.0.16                  healthy   27017
+  medcore-redis      redis:7.4.1-alpine            healthy   6379
+  medcore-kafka      apache/kafka:3.7.1 (KRaft)    healthy   29092
+  medcore-kafka-ui   provectuslabs/kafka-ui:v0.7.2 up        8090
+  medcore-mailpit    axllent/mailpit:v1.21.8       healthy   8025 / 1025
+
+Verificado dentro de los contenedores:
+  - Las 7 bases: auth_db, patient_db, appointment_db, medical_db, lab_db,
+    inventory_db, notification_db.
+  - Mongo: lab_results_db (lab_results, hl7_messages) y analytics_db
+    (epidemiological_records, outbreak_alerts, indicator_snapshots), con indices.
+  - Los 9 topicos Kafka.
+  - Redis responde PONG.
+
+5.1 Problemas resueltos
+    Kafka salia con codigo 1: el volumen nombrado se crea como root pero el
+    contenedor corre como uid=1000 (appuser), y no podia escribir meta.properties
+    al formatear el directorio KRaft. Se quito el volumen; los topicos los
+    recrea create-topics.sh, que es idempotente.
+
+    docker exec desde Git Bash convertia /opt/kafka/... en
+    C:/Program Files/Git/opt/kafka/... (traduccion de rutas de MSYS). El script
+    ahora exporta MSYS_NO_PATHCONV=1 y MSYS2_ARG_CONV_EXCL="*".
+
+5.2 Archivos escritos
+    .env.example                              plantilla de variables locales
+    docker-compose.infra.yml                  stack de infraestructura
+    infra/postgres/init/01-create-databases.sql    las 7 bases
+    infra/mongo/init/01-init-collections.js        colecciones e indices
+    infra/kafka/create-topics.sh                   los 9 topicos, idempotente
+
+
+--------------------------------------------------------------------------------
+6. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] Detener y poner en Manual los servicios nativos MongoDB y
+      postgresql-x64-18  (ver punto 3.3)
+  [ ] POM padre multi-modulo en medcore-backend/pom.xml
+      Spring Boot 4.0.9, BOM de Spring Cloud 2025.1.4, Testcontainers,
+      medcore-commons, y pluginManagement con lombok +
+      lombok-mapstruct-binding + mapstruct-processor
+  [ ] medcore-commons: ApiResponse, GlobalExceptionHandler base,
+      HeaderAuthenticationFilter, eventos compartidos
+  [ ] eureka-server (:8761)
+  [ ] config-server (:8888) en modo native sobre infra/config-repo
+  [ ] api-gateway (:8080) con filtro JWT, CORS y rate limit en Redis
+  [ ] docker-compose.yml completo con depends_on y start_period: 90s
+  [ ] Makefile
+  [ ] Seeds de Postgres: auth_seed.sql, cie10_seed.sql, lab_catalog_seed.sql
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
