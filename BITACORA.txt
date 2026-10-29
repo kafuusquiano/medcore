@@ -260,3 +260,181 @@ Verificado dentro de los contenedores:
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 02  -  29 de octubre de 2026
+Objetivo: completar la Fase 1, la infraestructura Spring Cloud.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. PUERTOS LIBERADOS
+--------------------------------------------------------------------------------
+
+Se detuvieron y pasaron a arranque Manual los servicios nativos MongoDB y
+postgresql-x64-18. Verificado despues: localhost:5432 responde Postgres 16.6
+con las 7 bases, y localhost:27017 responde Mongo 7.0.16 con lab_results_db y
+analytics_db. Los contenedores tienen el control de ambos puertos.
+
+
+--------------------------------------------------------------------------------
+2. VERSIONES DE SPRING, VERIFICADAS EN MAVEN CENTRAL
+--------------------------------------------------------------------------------
+
+Spring Boot 4.0.9 + Spring Cloud 2025.1.4. Se descarto Boot 4.1.1 porque
+ningun tren estable de Spring Cloud apunta a 4.1.x: 2025.1.4 declara
+spring-boot.version 4.0.9 y 2026.0.0-RC1 declara 4.2.0-RC1.
+
+Versiones efectivas resueltas en el arbol de dependencias:
+  spring-cloud-starter-gateway-server-webflux   5.0.4
+  spring-cloud-starter-netflix-eureka-server    5.0.3
+  spring-cloud-starter-netflix-eureka-client    5.0.3
+  spring-cloud-starter-config                   5.0.6
+  spring-boot-starter-data-redis-reactive       4.0.9
+
+IMPORTANTE: el starter del gateway se renombro en la rama 5.x. El antiguo
+spring-cloud-starter-gateway ya no existe.
+
+
+--------------------------------------------------------------------------------
+3. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+3.1 POM padre multi-modulo (medcore-backend/pom.xml)
+    dependencyManagement con el BOM de Spring Cloud, MapStruct, Springdoc y
+    jjwt. pluginManagement con el orden obligatorio de annotation processors:
+    lombok, lombok-mapstruct-binding, mapstruct-processor. Invertirlo hace que
+    MapStruct no vea los getters que genera Lombok.
+
+3.2 medcore-commons
+    ApiResponse y ErrorResponse como records con JsonInclude NON_NULL (G2),
+    MedCoreException con atajos por codigo HTTP (G3), GatewayHeaders (MC4),
+    KafkaTopics con los nueve topicos, e interfaz BaseEvent.
+
+    Los starters de arranque van como optional: si se propagaran, el
+    api-gateway recibiria spring-boot-starter-web, Spring arrancaria en modo
+    servlet y el gateway dejaria de enrutar. Verificado que no se filtra
+    Tomcat ni spring-webmvc al gateway.
+
+3.3 eureka-server (:8761)
+    Tres perfiles. En local sin enable-self-preservation, porque con reinicios
+    frecuentes esa proteccion impide expulsar servicios caidos y el dashboard
+    queda mostrando instancias fantasma. En prod activada, para que un corte de
+    red momentaneo no vacie el registro.
+    Verificado: arranca en 9.6s, health UP, dashboard sirviendo.
+
+3.4 config-server (:8888)
+    Modo native sobre infra/config-repo. Sin repositorio medcore-config, sin
+    token de GitHub.
+    Verificado sirviendo /patient-service/local con las tres fuentes en el
+    orden correcto y los valores de cada servicio.
+
+3.5 infra/config-repo, los 11 archivos
+    application.yml comun (Jackson, Kafka con idempotencia, Eureka detectando
+    caidas en 15s, actuator, springdoc, patron de log con requestId),
+    application-local.yml y uno por servicio con su base, timeouts y
+    parametros de dominio. Ninguna credencial literal: todo por placeholder.
+
+3.6 api-gateway (:8080)
+    JwtAuthenticationFilter como GlobalFilter en HIGHEST_PRECEDENCE+1.
+    UserHeaderPropagator sobrescribe siempre X-User-Id y X-User-Role y las
+    borra en rutas publicas, para que un cliente externo no inyecte su rol.
+    RouteValidator deja pasar las preflight OPTIONS, que nunca llevan
+    Authorization. RouteConfig con las ocho rutas lb:// explicitas.
+    RateLimiterConfig con cubeta de tokens en Redis, por usuario o por IP.
+    GatewayExceptionHandler traduce a ApiResponse los errores de enrutamiento.
+
+3.7 docker-compose.yml y Makefile
+    Orden de MC2 con depends_on y condition service_healthy, start_period de
+    90s. Solo se publican el 8080 del gateway y el 8025 de Mailpit; todo lo
+    demas queda en la red interna, que es lo que sostiene la confianza en
+    X-User-Role.
+    Makefile con up, down, infra, topics, build, test, health, eureka, tunnel
+    y reset. Requiere make, que no viene en Windows:
+    winget install -e --id ezwinports.make
+
+
+--------------------------------------------------------------------------------
+4. PROBLEMAS ENCONTRADOS Y RESUELTOS
+--------------------------------------------------------------------------------
+
+4.1 InvalidConfigDataPropertyException en config-server
+    Se habia puesto spring.profiles.active: native dentro de
+    application-local.yml. Spring Boot prohibe fijar el perfil activo desde un
+    archivo especifico de perfil. Resuelto con spring.profiles.group en
+    application.yml, mapeando local a native y prod a native.
+
+4.2 PlaceholderResolutionException en el gateway
+    La anotacion Value sobre gateway.rutas-publicas fallaba. El config-server
+    entrega las listas YAML como claves indexadas (gateway.rutas-publicas[0],
+    [1], ...) y no existe la clave plana; solo el binder de
+    ConfigurationProperties sabe reconstruir la lista. Resuelto con la clase
+    GatewayProperties.
+
+4.3 Jackson 3 en Spring Boot 4
+    spring.jackson.serialization.write-dates-as-timestamps rompia el arranque
+    con "No enum constant tools.jackson.databind.SerializationFeature...".
+    En Jackson 3 el paquete es tools.jackson y esa opcion salio de
+    SerializationFeature hacia DateTimeFeature. Se elimino: el valor por
+    defecto de Jackson 3 ya es ISO-8601.
+
+4.4 requestId ausente en los errores de enrutamiento
+    El GatewayExceptionHandler recibe el exchange original, no el que mutó el
+    filtro, asi que no veia la cabecera X-Request-Id. Resuelto guardandolo
+    como atributo del exchange.
+
+4.5 Error 503 generico
+    Los errores por falta de instancia salian como ERROR_GATEWAY. Ahora se
+    distinguen SERVICIO_NO_DISPONIBLE, LIMITE_PETICIONES y RUTA_NO_ENCONTRADA.
+
+4.6 CRLF en el Makefile
+    Con SHELL igual a /bin/bash, un Makefile entregado con CRLF hace fallar
+    las recetas. Se agrego a .gitattributes junto a *.mk.
+
+
+--------------------------------------------------------------------------------
+5. PRUEBAS EJECUTADAS CONTRA EL STACK EN MARCHA
+--------------------------------------------------------------------------------
+
+  Ruta publica sin token              200
+  Ruta protegida sin token            401 TOKEN_AUSENTE
+  Token invalido                      401 TOKEN_INVALIDO
+  Token expirado                      401 TOKEN_EXPIRADO
+  Authorization sin prefijo Bearer    401
+  Preflight CORS                      200 con Allow-Origin y Allow-Methods
+  Token valido (sub=42, rol=MEDICO)   503 SERVICIO_NO_DISPONIBLE (enruta bien)
+  Ruta inexistente                    404 RUTA_NO_ENCONTRADA
+  X-Request-Id entrante               se conserva de extremo a extremo
+
+Todas las respuestas de error llegan con el wrapper ApiResponse y sin stack
+trace, conforme a G2 y G3.
+
+
+--------------------------------------------------------------------------------
+6. COMMITS DE ESTA SESION
+--------------------------------------------------------------------------------
+
+  c48707c  feat(backend): POM padre multi-modulo y nucleo de medcore-commons
+  935ac6f  feat(eureka): servidor de registro completo con perfiles y Dockerfile
+  321a934  feat(config): config-server en modo native y configuracion de los 11 servicios
+  57a1202  feat(gateway): filtro JWT, propagacion de headers, rate limit y rutas
+  7884775  feat(infra): stack completo en compose y Makefile de desarrollo
+  5f30448  fix: forzar LF en el Makefile
+
+
+--------------------------------------------------------------------------------
+7. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] Completar medcore-commons: BaseGlobalExceptionHandler,
+      HeaderAuthenticationFilter, PageableResponse, los cinco eventos de
+      dominio, DateUtil, QrCodeUtil y PdfUtil
+  [ ] Seeds de Postgres: auth_seed.sql, cie10_seed.sql, lab_catalog_seed.sql
+  [ ] auth-service (:8081), base de la seguridad: entidades, Flyway, JWT,
+      login, refresh, logout y gestion de usuarios
+  [ ] Al implementar cada servicio: descomentar su modulo en el POM padre y
+      su bloque en docker-compose.yml
+  [ ] Instalar make si se quiere usar el Makefile
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+  [ ] .github/workflows/ci.yml
+
+================================================================================
