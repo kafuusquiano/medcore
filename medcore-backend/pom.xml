@@ -31,8 +31,8 @@
          Descomentar cada uno al crear su pom.xml y su clase Application. -->
     <module>services/auth-service</module>
     <module>services/patient-service</module>
-    <!--
     <module>services/appointment-service</module>
+    <!--
     <module>services/medical-service</module>
     <module>services/laboratory-service</module>
     <module>services/inventory-service</module>

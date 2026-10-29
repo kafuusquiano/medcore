@@ -183,33 +183,93 @@ services:
     networks: [medcore-net]
 
   # ---------- Nivel 5: microservicios ----------
-  # Se activan conforme se implementan (Fases 2 a 4). Cada uno repite
-  # este patron, cambiando nombre, Dockerfile y variables de su base:
-  #
-  #   auth-service:
-  #     build:
-  #       context: ./medcore-backend
-  #       dockerfile: services/auth-service/Dockerfile
-  #     image: medcore/auth-service:1.0.0
-  #     container_name: medcore-auth
-  #     depends_on:
-  #       config-server: { condition: service_healthy }
-  #       postgres:      { condition: service_healthy }
-  #       kafka:         { condition: service_healthy }
-  #     environment:
-  #       <<: *jvm-env
-  #       EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
-  #       SPRING_CLOUD_CONFIG_URI: http://config-server:8888
-  #       POSTGRES_HOST: postgres
-  #       POSTGRES_USER: ${POSTGRES_USER:-medcore}
-  #       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medcore}
-  #       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-  #       JWT_SECRET: ${JWT_SECRET}
-  #     # Sin ports: no se publica al host (MC4).
-  #     healthcheck:
-  #       test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
-  #       <<: *service-healthcheck
-  #     networks: [medcore-net]
+
+  auth-service:
+    build:
+      context: ./medcore-backend
+      dockerfile: services/auth-service/Dockerfile
+    image: medcore/auth-service:1.0.0
+    container_name: medcore-auth
+    depends_on:
+      config-server: { condition: service_healthy }
+      postgres:      { condition: service_healthy }
+      redis:         { condition: service_healthy }
+      kafka:         { condition: service_healthy }
+    environment:
+      <<: *jvm-env
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-medcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medcore}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_ADMIN_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+    # Sin ports: no se publica al host (MC4).
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      <<: *service-healthcheck
+    networks: [medcore-net]
+
+  patient-service:
+    build:
+      context: ./medcore-backend
+      dockerfile: services/patient-service/Dockerfile
+    image: medcore/patient-service:1.0.0
+    container_name: medcore-patient
+    depends_on:
+      config-server: { condition: service_healthy }
+      postgres:      { condition: service_healthy }
+      kafka:         { condition: service_healthy }
+    environment:
+      <<: *jvm-env
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-medcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medcore}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      <<: *service-healthcheck
+    networks: [medcore-net]
+
+  appointment-service:
+    build:
+      context: ./medcore-backend
+      dockerfile: services/appointment-service/Dockerfile
+    image: medcore/appointment-service:1.0.0
+    container_name: medcore-appointment
+    depends_on:
+      config-server:   { condition: service_healthy }
+      postgres:        { condition: service_healthy }
+      redis:           { condition: service_healthy }
+      kafka:           { condition: service_healthy }
+      patient-service: { condition: service_healthy }
+    environment:
+      <<: *jvm-env
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-medcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medcore}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_SSL: "false"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      <<: *service-healthcheck
+    networks: [medcore-net]
+
+  # Los cinco microservicios restantes se activan conforme se implementan,
+  # repitiendo este mismo patron.
 
   # ---------- Utilidades de desarrollo ----------
 
