@@ -39,6 +39,13 @@
       <artifactId>spring-kafka</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- Solo por la clase Page que usa PageableResponse. Optional para no
+         imponer Spring Data a los modulos que no persisten nada. -->
+    <dependency>
+      <groupId>org.springframework.data</groupId>
+      <artifactId>spring-data-commons</artifactId>
+      <optional>true</optional>
+    </dependency>
 
     <!-- Estas si son transitivas: todo modulo que use commons las necesita. -->
     <dependency>

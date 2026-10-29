@@ -1,0 +1,15 @@
+# ============================================================
+# auth-service — perfil prod (dentro de docker-compose).
+# No publica puerto al host: solo es alcanzable por el gateway (MC4).
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://config-server:8888}
+
+logging:
+  level:
+    root: INFO
+    com.medcore.auth: INFO
+    org.hibernate.SQL: WARN

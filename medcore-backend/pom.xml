@@ -29,8 +29,8 @@
 
     <!-- Los microservicios se activan conforme se implementan (Fases 2 a 4).
          Descomentar cada uno al crear su pom.xml y su clase Application. -->
-    <!--
     <module>services/auth-service</module>
+    <!--
     <module>services/patient-service</module>
     <module>services/appointment-service</module>
     <module>services/medical-service</module>
