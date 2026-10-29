@@ -779,3 +779,183 @@ levantar una segunda instancia del servicio.
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 05  -  29 de octubre de 2026
+Objetivo: medical-service, inicio de la Fase 3.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+medical-service (:8084) con cinco entidades y tres migraciones:
+  cie10_codes        catalogo de solo lectura, 17 codigos frecuentes cargados
+  medical_attentions la consulta, contenedor de todo lo demas
+  diagnoses          diagnosticos emitidos en la atencion
+  lab_orders         ordenes de laboratorio
+  lab_order_tests    pruebas solicitadas en cada orden
+
+
+--------------------------------------------------------------------------------
+2. DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+2.1 Una atencion finalizada es inmutable
+    Es un registro clinico. Para corregirla se anula y se registra otra, de
+    modo que quede constancia de la correccion. La entidad rechaza cualquier
+    cambio cuando el estado no es EN_CURSO.
+
+2.2 No se finaliza sin diagnostico
+    Una consulta sin diagnostico no deja constancia de por que se atendio al
+    paciente ni sirve para la estadistica epidemiologica.
+
+    La validacion ocurre ANTES de cambiar el estado. Al reves, si la
+    excepcion se capturara, el objeto quedaria marcado como finalizado en
+    memoria sin haberlo sido.
+
+2.3 La descripcion del CIE-10 sale del catalogo, no de la peticion
+    Y se copia al diagnostico. El catalogo puede corregir su redaccion con el
+    tiempo, y un diagnostico ya emitido debe conservar el texto con el que se
+    emitio. Lo mismo con la marca de notificable: la pone el catalogo, de modo
+    que el cliente no pueda ocultar un caso de notificacion obligatoria.
+
+2.4 Indices unicos PARCIALES
+    ux_attention_cita_viva      una cita produce como mucho una atencion viva,
+                                pero si se anula puede registrarse otra
+    ux_diagnosis_atencion_codigo  un codigo no se repite en la misma atencion
+    ux_diagnosis_principal      como mucho un diagnostico principal
+
+2.5 Una orden se anula solo antes de la muestra
+    Despues ya se pincho al paciente y hay material en proceso: anularla
+    dejaria al laboratorio con una muestra sin orden que la justifique.
+
+2.6 Codigo legible de la orden
+    ORD-20261029-0007, correlativo dentro del dia. El id numerico es interno
+    y no sirve para imprimirlo en un papel que lleva el paciente.
+    LIMITACION: con dos instancias, dos ordenes simultaneas calcularian el
+    mismo correlativo. La restriccion UNIQUE lo rechazaria y la segunda
+    fallaria. Para escalar hace falta una secuencia de Postgres.
+
+2.7 El consumidor de appointment.cancelled no toca atenciones finalizadas
+    Que la cita se cancele despues de atender al paciente es una incoherencia
+    administrativa, pero el registro clinico debe conservarse intacto.
+
+
+--------------------------------------------------------------------------------
+3. DOS ERRORES DE KAFKA QUE AFECTABAN A TODOS LOS CONSUMIDORES
+--------------------------------------------------------------------------------
+
+Los tres consumidores escritos hasta ahora (auth, appointment, medical) tenian
+el mismo defecto y NINGUNO funcionaba. No se habia detectado porque hasta esta
+sesion no se habia publicado un evento real contra un consumidor.
+
+3.1 Acknowledgment con ack-mode automatico
+    Error en ejecucion:
+      java.lang.IllegalStateException: No Acknowledgment available as an
+      argument, the listener container must have a MANUAL AckMode to populate
+      the Acknowledgment.
+
+    Los listeners declaraban un parametro Acknowledgment y hacian
+    ack.acknowledge() en un finally, pero la configuracion usa ack-mode:
+    record, que es automatico; ese parametro solo se inyecta con MANUAL.
+
+    Resuelto quitando el parametro. Con ack-mode record el contenedor confirma
+    el offset al terminar el listener sin excepcion, y como el metodo atrapa
+    toda RuntimeException, un fallo queda en el log y el offset avanza
+    igualmente: el efecto buscado, sin riesgo de olvidar un ack.
+
+3.2 JsonDeserializer exige la cabecera __TypeId__
+    Error en ejecucion:
+      java.lang.IllegalStateException: No type information in headers and no
+      default type provided
+
+    JsonDeserializer necesita la cabecera que anade JsonSerializer. Entre
+    servicios funciona, pero falla ante cualquier productor que no la ponga:
+    un reenvio manual con kafka-console-producer, una reinyeccion de un evento
+    o un productor escrito en otro lenguaje. Ademas acopla al consumidor con
+    el nombre completo de la clase Java del productor.
+
+    Resuelto pasando a ByteArrayDeserializer mas ByteArrayJsonMessageConverter,
+    que deduce el tipo de la firma del @KafkaListener. El bean del conversor se
+    declaro en el KafkaConfig de los cuatro servicios.
+
+3.3 Efecto colateral: mensaje veneno
+    El mensaje que fallo quedo en el offset 0 y el grupo se atasco
+    reintentandolo. Se avanzo con:
+      kafka-consumer-groups.sh --group medical-service --reset-offsets
+        --to-latest --topic appointment.cancelled --execute
+
+
+--------------------------------------------------------------------------------
+4. OTROS PROBLEMAS DE LA SESION
+--------------------------------------------------------------------------------
+
+4.1 Escape perdido en un heredoc
+    El patron "^[A-Z][0-9]{2}(\\.[0-9X])?$" perdia una barra al escribirse con
+    heredoc y quedaba como escape ilegal en Java. Se reescribio usando una
+    clase de caracteres, [.], que no necesita escape.
+
+4.2 Jar bloqueados al compilar
+    Dos causas distintas. Los propios servicios en ejecucion, que no se
+    detectaban porque su linea de comandos usa rutas RELATIVAS
+    (-jar services/...) y el filtro buscaba la ruta absoluta. Y el language
+    server de Spring Boot de VS Code, que indexa los jar del workspace.
+
+
+--------------------------------------------------------------------------------
+5. PRUEBAS EJECUTADAS CONTRA EL STACK EN MARCHA
+--------------------------------------------------------------------------------
+
+  Catalogo CIE-10 cargado             2 resultados para "farin"
+  Abrir atencion                      201, EN_CURSO
+  Finalizar sin diagnostico           409 ATENCION_SIN_DIAGNOSTICO
+  Signos vitales                      IMC 24.22 calculado (70kg / 1.70m)
+  Presion sistolica < diastolica      400 PRESION_INCOHERENTE
+  Codigo CIE-10 inexistente           422 CIE10_NO_EXISTE
+  Diagnostico principal J02.9         registrado, notificable false
+  Segundo principal                   409 DIAGNOSTICO_PRINCIPAL_DUPLICADO
+  Diagnostico repetido                409 DIAGNOSTICO_DUPLICADO
+  Diagnostico A09                     notificable TRUE, tomado del catalogo
+  Emitir orden con prueba repetida    2 pruebas, la repetida descartada
+  Codigo generado                     ORD-20261029-0001
+  Editar atencion finalizada          409 OPERACION_NO_PERMITIDA
+  Orden sobre atencion cerrada        409 ATENCION_CERRADA
+  Orden sin pruebas                   400 VALIDACION_FALLIDA
+  Buscar orden por codigo             encontrada, anulable true
+  LABORATORISTA emite orden           403
+  Evento lab-order.created            requestId trace-med-1 propagado
+  Consumidor appointment.cancelled    atencion anulada con el motivo
+  Evento repetido                     idempotente, no cambia el motivo
+  Cita sin atencion abierta           "nada que anular", sin error
+
+12 tests unitarios adicionales, todos en verde.
+
+
+--------------------------------------------------------------------------------
+6. COMMITS DE ESTA SESION
+--------------------------------------------------------------------------------
+
+  6e72978  feat(medical): atenciones, diagnosticos CIE-10 y ordenes de laboratorio
+
+
+--------------------------------------------------------------------------------
+7. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] laboratory-service (:8085): muestras, resultados y HL7 con HAPI.
+      Consume lab-order.created. Publica sample.registered,
+      result.registered y result.critical
+  [ ] inventory-service (:8086): reactivos, stock y alertas
+  [ ] analytics-service (:8087): epidemiologia sobre MongoDB
+  [ ] notification-service (:8088): el consumidor con mas topicos
+  [ ] Al implementar cada uno: anadir spring-boot-flyway y spring-boot-kafka,
+      el bean ByteArrayJsonMessageConverter, y NO declarar Acknowledgment en
+      los listeners
+  [ ] Completar medcore-commons: eventos de resultado e inventario, DateUtil,
+      QrCodeUtil y PdfUtil
+  [ ] Seeds de Postgres: cie10_seed.sql completo y lab_catalog_seed.sql
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
