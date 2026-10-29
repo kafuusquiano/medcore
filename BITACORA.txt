@@ -438,3 +438,198 @@ trace, conforme a G2 y G3.
   [ ] .github/workflows/ci.yml
 
 ================================================================================
+
+================================================================================
+SESION 03  -  29 de octubre de 2026
+Objetivo: Fase 2, los microservicios core. auth-service y patient-service.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. AUTH-SERVICE (:8081)
+--------------------------------------------------------------------------------
+
+1.1 Modelo
+    User, Role y SessionLog, con migraciones Flyway V1 y V2.
+    Indice unico PARCIAL sobre id_paciente: un paciente no puede tener dos
+    cuentas, pero los usuarios internos repiten NULL sin chocar.
+    Indice sobre LOWER(correo) para que el login no distinga mayusculas.
+    session_log registra tanto los accesos correctos como los fallidos: una
+    racha de fallos desde una misma IP delata un ataque de fuerza bruta.
+
+1.2 Autenticacion
+    Login por DNI o por correo en el mismo campo. Refresh con rotacion: cada
+    renovacion emite un refresh nuevo, de modo que un token robado tenga una
+    ventana de uso acotada. Logout revoca en Redis.
+
+    La lista negra guarda el jti, no el token entero, con TTL igual a la
+    vigencia restante: Redis libera la clave sola cuando el token ya no
+    serviria de todas formas, y la lista no crece sin limite.
+
+1.3 Decisiones de seguridad
+    Usuario inexistente y contrasena incorrecta devuelven el MISMO error,
+    CREDENCIALES_INVALIDAS. Mensajes distintos permitirian averiguar que DNI
+    estan registrados en la clinica.
+
+    Cuando el usuario no existe se cifra igualmente contra un hash ficticio,
+    para que el tiempo de respuesta no delate su existencia.
+
+    AdminBootstrap crea el ADMIN inicial solo si no hay ninguno, con la
+    contrasena de ADMIN_INITIAL_PASSWORD o una aleatoria que se muestra una
+    sola vez en el log. No se versiona ningun hash conocido en el repositorio:
+    cualquiera que clonara el proyecto podria entrar como administrador.
+
+1.4 Resultados
+    18 tests unitarios. Verificado contra Postgres y Redis reales.
+
+
+--------------------------------------------------------------------------------
+2. PATIENT-SERVICE (:8082)
+--------------------------------------------------------------------------------
+
+2.1 Modelo
+    Patient y MedicalHistory, con migraciones V1 y V2.
+    La edad NO se almacena: se calcula al responder, porque una edad guardada
+    queda obsoleta al dia siguiente del cumpleanos. Filtrar por edad se
+    traduce a un rango de fechas de nacimiento, asi la consulta aprovecha el
+    indice.
+
+    Indice unico PARCIAL sobre (origen, referencia_externa) en el historial,
+    para que un reintento del servicio de origen no duplique un episodio.
+
+2.2 Sin Redis ni jjwt
+    Decision deliberada, y coincide con la seccion 3.3 de la guia.
+    jjwt solo lo necesita quien emite tokens (auth-service) o verifica su
+    firma (api-gateway). patient-service confia en las cabeceras del gateway
+    (MC4). Incluirlo seria codigo muerto e invitaria a duplicar la logica de
+    seguridad en ocho servicios.
+    Redis no se usa porque no hay nada que cachear; con el starter presente,
+    Spring intentaria conectar al arrancar y fallaria el healthcheck por una
+    dependencia que no se usa.
+
+2.3 Decisiones de diseno
+    El DNI se ignora al actualizar: cambiarlo equivaldria a sustituir a la
+    persona de la ficha y dejaria su historial atribuido a otra.
+
+    Las fichas no se borran. Un historial clinico es un registro que debe
+    conservarse; dar de baja solo la saca de las busquedas operativas. Una
+    ficha cerrada por fallecimiento no se reabre.
+
+    El listado devuelve PatientSummaryResponse, de seis campos. Una busqueda
+    que devuelve cien pacientes no debe transportar direcciones, alergias ni
+    contactos de emergencia.
+
+    PatientSpecification en lugar de metodos derivados: con seis criterios
+    opcionales y combinables harian falta decenas de metodos en el repositorio.
+
+2.4 Eventos publicados tras el commit, no dentro de la transaccion
+    publicarTrasCommit registra una TransactionSynchronization y publica en
+    afterCommit. Publicar dentro de la transaccion permitiria que auth-service
+    reciba el patient.created y consulte un paciente que todavia no existe, o
+    que la transaccion revierta despues y quede un evento de un paciente que
+    nunca se registro.
+
+    Se publica con el DNI como clave de particion, para que todos los eventos
+    de un mismo paciente vayan a la misma particion y lleguen en orden: sin
+    eso, un patient.updated podria procesarse antes que su patient.created.
+
+2.5 Resultados
+    10 tests unitarios. Verificado contra Postgres y Kafka reales.
+
+
+--------------------------------------------------------------------------------
+3. PROBLEMAS ENCONTRADOS Y RESUELTOS
+--------------------------------------------------------------------------------
+
+3.1 Spring Boot 4 repartio las autoconfiguraciones en modulos
+    Con solo flyway-core las migraciones no se ejecutan y Hibernate falla con
+    "Schema validation: missing table [roles]". Hace falta
+    org.springframework.boot:spring-boot-flyway.
+
+    Lo mismo con Kafka: spring-kafka no es un starter de Boot, asi que nadie
+    arrastra su autoconfiguracion, y sin org.springframework.boot:spring-boot-kafka
+    no existe el bean kafkaListenerContainerFactory.
+
+    Esto aplica a los seis microservicios que faltan.
+
+3.2 Bug de transacciones en el bloqueo de cuentas
+    El contador de intentos fallidos y la fila de auditoria se guardaban en la
+    misma transaccion que despues lanzaba la excepcion de credenciales. El
+    rollback los revertia: la cuenta NUNCA llegaba a bloquearse y los intentos
+    fallidos no quedaban registrados.
+
+    Solo aparecio al ejecutar el servicio de verdad; los tests con mocks no lo
+    habrian detectado. Resuelto con AuthAuditService y
+    @Transactional(propagation = REQUIRES_NEW). Al ser un bean distinto, la
+    llamada pasa por el proxy de Spring; en la misma clase la propagacion se
+    ignoraria.
+
+3.3 anyLong() de Mockito no coincide con null
+    El usuario de prueba no tenia id, el stub no se aplicaba y el test fallaba
+    por una razon distinta a la real. Resuelto con ReflectionTestUtils.
+
+
+--------------------------------------------------------------------------------
+4. PRUEBAS EJECUTADAS CONTRA EL STACK EN MARCHA
+--------------------------------------------------------------------------------
+
+auth-service
+  Login por DNI                         200, rol ADMIN
+  Login por correo con mayusculas       200
+  Contrasena incorrecta                 401 CREDENCIALES_INVALIDAS
+  Usuario inexistente                   401 CREDENCIALES_INVALIDAS (identico)
+  Contrasena corta                      400 VALIDACION_FALLIDA con detalle
+  Refresh                               200, par de tokens nuevo
+  Cinco intentos fallidos               403 CUENTA_BLOQUEADA, BLOCKED en la base
+  Desbloqueo por ADMIN                  login vuelve a funcionar
+  Sin cabeceras del gateway             403
+  Rol MEDICO en /api/users              403
+  Logout                                2 claves en Redis, TTL 3598s
+  Refresh revocado                      401 TOKEN_REVOCADO
+
+patient-service
+  Alta                                  201, correo normalizado a minusculas
+  DNI duplicado                         409 DNI_YA_REGISTRADO
+  DNI de 7 digitos y fecha futura       400 con los dos campos senalados
+  Busqueda parcial por texto            1 resultado, resumen de 6 campos
+  LABORATORISTA intenta crear           403
+  Sin cabeceras del gateway             403
+  Evento patient.created                publicado con requestId trace-pac-1
+  Historial idempotente                 segundo POST devuelve el episodio
+                                        original, 1 sola fila en la base
+  desactivar / reactivar                INACTIVO / ACTIVO
+  RECEPCIONISTA marca fallecido         403
+  MEDICO marca fallecido                FALLECIDO
+  Reactivar ficha de fallecido          409 OPERACION_NO_PERMITIDA
+  Actualizar con otro DNI               se ignora, conserva el original
+
+
+--------------------------------------------------------------------------------
+5. COMMITS DE ESTA SESION
+--------------------------------------------------------------------------------
+
+  2b6da9a  feat(auth): auth-service completo con JWT, roles y auditoria de accesos
+  e012e31  wip(patient): dominio, persistencia y servicio de pacientes
+  1a44069  feat(patient): patient-service completo con historial clinico y eventos
+
+
+--------------------------------------------------------------------------------
+6. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] appointment-service (:8083): citas, slots de 30 min, Feign hacia
+      patient-service con Resilience4j, cache de disponibilidad en Redis,
+      y bloqueo al reservar para evitar la doble reserva del mismo slot
+  [ ] medical-service (:8084): atenciones, CIE-10 y ordenes de laboratorio
+  [ ] laboratory-service (:8085): muestras, resultados y HL7 con HAPI
+  [ ] inventory-service (:8086), analytics-service (:8087) y
+      notification-service (:8088)
+  [ ] Al implementar cada uno: anadir spring-boot-flyway y spring-boot-kafka,
+      descomentar su modulo en el POM padre y su bloque en docker-compose.yml
+  [ ] Completar medcore-commons: los eventos de cita, laboratorio e
+      inventario, DateUtil, QrCodeUtil y PdfUtil
+  [ ] Seeds de Postgres: cie10_seed.sql y lab_catalog_seed.sql
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+  [ ] Instalar make si se quiere usar el Makefile
+
+================================================================================
