@@ -13,6 +13,9 @@ Dockerfile      text eol=lf
 mvnw            text eol=lf
 .env.example    text eol=lf
 infra/**/*.js   text eol=lf
+# El Makefile usa SHELL := /bin/bash; con CRLF las recetas fallan.
+Makefile        text eol=lf
+*.mk            text eol=lf
 
 # Scripts de Windows: siempre CRLF.
 *.cmd           text eol=crlf
