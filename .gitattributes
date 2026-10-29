@@ -1,0 +1,33 @@
+# Normalizacion de fin de linea.
+# Por defecto Git normaliza a LF en el repositorio.
+* text=auto
+
+# Estos SIEMPRE con LF: con CRLF fallan dentro de contenedores Linux
+# ("bad interpreter" en los .sh, errores de parseo en los .sql y .js de init).
+*.sh            text eol=lf
+*.sql           text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+mvnw            text eol=lf
+.env.example    text eol=lf
+infra/**/*.js   text eol=lf
+
+# Scripts de Windows: siempre CRLF.
+*.cmd           text eol=crlf
+*.bat           text eol=crlf
+mvnw.cmd        text eol=crlf
+
+# Binarios: sin conversion.
+*.jar           binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.docx          binary
+*.xlsx          binary
+*.woff          binary
+*.woff2         binary
