@@ -1,0 +1,16 @@
+# ============================================================
+# api-gateway — perfil prod (dentro de docker-compose).
+# Es el unico servicio con el puerto publicado al host y el unico
+# que atraviesa el tunel hacia internet.
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://config-server:8888}
+
+logging:
+  level:
+    root: INFO
+    com.medcore.gateway: INFO
+    org.springframework.cloud.gateway: WARN

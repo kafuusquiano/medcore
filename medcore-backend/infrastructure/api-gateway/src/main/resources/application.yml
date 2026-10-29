@@ -1,0 +1,26 @@
+# ============================================================
+# api-gateway — configuracion minima dentro del JAR (regla MC3).
+# Solo nombre, puerto e importacion del config-server. Las rutas,
+# CORS, rate limit y timeouts viven en infra/config-repo/api-gateway.yml.
+# ============================================================
+
+spring:
+  application:
+    name: api-gateway
+  profiles:
+    default: local
+  config:
+    # optional: permite arrancar aunque el config-server no responda todavia.
+    # El orden de MC2 ya garantiza que este sano antes, pero evita que un
+    # reinicio del config-server tumbe el gateway.
+    import: optional:configserver:${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+  cloud:
+    config:
+      fail-fast: false
+      retry:
+        max-attempts: 6
+        initial-interval: 2000
+        max-interval: 10000
+
+server:
+  port: ${SERVER_PORT:8080}

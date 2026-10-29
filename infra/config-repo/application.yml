@@ -11,7 +11,11 @@ spring:
   jackson:
     default-property-inclusion: non_null
     serialization:
-      write-dates-as-timestamps: false
+      # No se declara write-dates-as-timestamps: en Jackson 3, que es el que
+      # trae Spring Boot 4, esa opcion salio de SerializationFeature y paso a
+      # DateTimeFeature, y ademas su valor por defecto ya es ISO-8601.
+      # Dejarla aqui rompe el arranque con:
+      #   No enum constant tools.jackson.databind.SerializationFeature.write-dates-as-timestamps
       fail-on-empty-beans: false
     deserialization:
       fail-on-unknown-properties: false

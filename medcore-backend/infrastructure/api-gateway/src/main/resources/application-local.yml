@@ -1,0 +1,16 @@
+# ============================================================
+# api-gateway — perfil local.
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+logging:
+  level:
+    com.medcore.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO
+    # Muestra que ruta se eligio para cada peticion. Util al depurar
+    # un 404 que en realidad es una ruta mal declarada.
+    org.springframework.cloud.gateway.handler.RoutePredicateHandlerMapping: DEBUG
