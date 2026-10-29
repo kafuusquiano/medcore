@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.0.9</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.medcore</groupId>
+  <artifactId>medcore-backend</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>medcore-backend</name>
+  <description>MedCore - backend de microservicios Spring Cloud</description>
+
+  <modules>
+    <module>shared/medcore-commons</module>
+
+    <module>infrastructure/eureka-server</module>
+    <module>infrastructure/config-server</module>
+    <module>infrastructure/api-gateway</module>
+
+    <!-- Los microservicios se activan conforme se implementan (Fases 2 a 4).
+         Descomentar cada uno al crear su pom.xml y su clase Application. -->
+    <!--
+    <module>services/auth-service</module>
+    <module>services/patient-service</module>
+    <module>services/appointment-service</module>
+    <module>services/medical-service</module>
+    <module>services/laboratory-service</module>
+    <module>services/inventory-service</module>
+    <module>services/analytics-service</module>
+    <module>services/notification-service</module>
+    -->
+  </modules>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- Tren de Spring Cloud emparejado con Spring Boot 4.0.9.
+         No subir a 2026.0.x: ese tren apunta a Boot 4.2.x. -->
+    <spring-cloud.version>2025.1.4</spring-cloud.version>
+
+    <mapstruct.version>1.6.3</mapstruct.version>
+    <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+    <springdoc.version>2.8.13</springdoc.version>
+    <jjwt.version>0.12.6</jjwt.version>
+    <hapi-hl7.version>2.5.1</hapi-hl7.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+
+      <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-dependencies</artifactId>
+        <version>${spring-cloud.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- Libreria compartida del proyecto (G2 ApiResponse, G3 handler base,
+           MC4 HeaderAuthenticationFilter, eventos Kafka). -->
+      <dependency>
+        <groupId>com.medcore</groupId>
+        <artifactId>medcore-commons</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.mapstruct</groupId>
+        <artifactId>mapstruct</artifactId>
+        <version>${mapstruct.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>org.springdoc</groupId>
+        <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        <version>${springdoc.version}</version>
+      </dependency>
+
+      <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-api</artifactId>
+        <version>${jjwt.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-impl</artifactId>
+        <version>${jjwt.version}</version>
+        <scope>runtime</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.jsonwebtoken</groupId>
+        <artifactId>jjwt-jackson</artifactId>
+        <version>${jjwt.version}</version>
+        <scope>runtime</scope>
+      </dependency>
+
+    </dependencies>
+  </dependencyManagement>
+
+  <!-- Dependencias comunes a todos los modulos. -->
+  <dependencies>
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+
+        <!-- Orden obligatorio de los processors: lombok, luego el binding,
+             luego mapstruct. Invertirlo hace que MapStruct no vea los
+             getters y setters generados por Lombok. -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <configuration>
+            <annotationProcessorPaths>
+              <path>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+              </path>
+              <path>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok-mapstruct-binding</artifactId>
+                <version>${lombok-mapstruct-binding.version}</version>
+              </path>
+              <path>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct-processor</artifactId>
+                <version>${mapstruct.version}</version>
+              </path>
+            </annotationProcessorPaths>
+            <compilerArgs>
+              <arg>-Amapstruct.defaultComponentModel=spring</arg>
+              <arg>-Amapstruct.unmappedTargetPolicy=WARN</arg>
+              <arg>-parameters</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <configuration>
+            <excludes>
+              <exclude>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+              </exclude>
+            </excludes>
+          </configuration>
+        </plugin>
+
+      </plugins>
+    </pluginManagement>
+  </build>
+
+</project>
