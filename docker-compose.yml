@@ -268,7 +268,31 @@ services:
       <<: *service-healthcheck
     networks: [medcore-net]
 
-  # Los cinco microservicios restantes se activan conforme se implementan,
+  medical-service:
+    build:
+      context: ./medcore-backend
+      dockerfile: services/medical-service/Dockerfile
+    image: medcore/medical-service:1.0.0
+    container_name: medcore-medical
+    depends_on:
+      config-server: { condition: service_healthy }
+      postgres:      { condition: service_healthy }
+      kafka:         { condition: service_healthy }
+    environment:
+      <<: *jvm-env
+      EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_CLOUD_CONFIG_URI: http://config-server:8888
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-medcore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-medcore}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/actuator/health"]
+      <<: *service-healthcheck
+    networks: [medcore-net]
+
+  # Los cuatro microservicios restantes se activan conforme se implementan,
   # repitiendo este mismo patron.
 
   # ---------- Utilidades de desarrollo ----------

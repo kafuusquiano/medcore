@@ -6,7 +6,6 @@ import com.medcore.commons.kafka.KafkaTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +18,12 @@ import org.springframework.stereotype.Component;
  * ack-mode: record, no confirmarlo haria que el consumidor reintentara el
  * mismo mensaje indefinidamente y bloqueara la particion. Un fallo aqui queda
  * en el log para tratarlo a mano, no detiene la cola.
+ *
+ * <p>No se declara un parametro Acknowledgment: con ack-mode: record el
+ * contenedor confirma el offset al terminar el listener sin excepcion, y ese
+ * parametro solo se inyecta con ack-mode MANUAL. Como el metodo atrapa toda
+ * RuntimeException, un fallo queda en el log y el offset avanza igualmente,
+ * de modo que un mensaje problematico no bloquea la particion.
  */
 @Component
 public class PatientCreatedConsumer {
@@ -32,7 +37,7 @@ public class PatientCreatedConsumer {
     }
 
     @KafkaListener(topics = KafkaTopics.PATIENT_CREATED, groupId = "auth-service")
-    public void alCrearsePaciente(PatientEvent evento, Acknowledgment ack) {
+    public void alCrearsePaciente(PatientEvent evento) {
         try {
             if (evento == null || evento.idPaciente() == null || evento.dni() == null) {
                 log.warn("Evento patient.created incompleto; se descarta");
@@ -52,8 +57,6 @@ public class PatientCreatedConsumer {
         } catch (RuntimeException e) {
             log.error("No se pudo crear la cuenta del paciente {}: {}",
                     evento == null ? null : evento.idPaciente(), e.getMessage(), e);
-        } finally {
-            ack.acknowledge();
         }
     }
 }

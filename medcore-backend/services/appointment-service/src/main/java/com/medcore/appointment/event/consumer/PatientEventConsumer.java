@@ -5,7 +5,6 @@ import com.medcore.commons.kafka.KafkaTopics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,6 +19,12 @@ import org.springframework.stereotype.Component;
  * es el punto donde encajara la cache de pacientes si la agenda llega a
  * necesitarla. El offset se confirma siempre: un fallo aqui no debe bloquear
  * la particion.
+ *
+ * <p>No se declara un parametro Acknowledgment: con ack-mode: record el
+ * contenedor confirma el offset al terminar el listener sin excepcion, y ese
+ * parametro solo se inyecta con ack-mode MANUAL. Como el metodo atrapa toda
+ * RuntimeException, un fallo queda en el log y el offset avanza igualmente,
+ * de modo que un mensaje problematico no bloquea la particion.
  */
 @Component
 public class PatientEventConsumer {
@@ -27,7 +32,7 @@ public class PatientEventConsumer {
     private static final Logger log = LoggerFactory.getLogger(PatientEventConsumer.class);
 
     @KafkaListener(topics = KafkaTopics.PATIENT_CREATED, groupId = "appointment-service")
-    public void alCambiarPaciente(PatientEvent evento, Acknowledgment ack) {
+    public void alCambiarPaciente(PatientEvent evento) {
         try {
             if (evento == null || evento.idPaciente() == null) {
                 log.warn("Evento de paciente incompleto; se descarta");
@@ -38,8 +43,6 @@ public class PatientEventConsumer {
 
         } catch (RuntimeException e) {
             log.error("Error procesando el evento de paciente: {}", e.getMessage(), e);
-        } finally {
-            ack.acknowledge();
         }
     }
 }
