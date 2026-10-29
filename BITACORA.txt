@@ -633,3 +633,149 @@ patient-service
   [ ] Instalar make si se quiere usar el Makefile
 
 ================================================================================
+
+================================================================================
+SESION 04  -  29 de octubre de 2026
+Objetivo: appointment-service, el servicio mas complejo de la Fase 2.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. EL PROBLEMA CENTRAL: LA DOBLE RESERVA
+--------------------------------------------------------------------------------
+
+Dos pacientes piden el mismo horario a la vez. Si ambos ganan, el medico
+tiene dos citas superpuestas y alguien se queda sin atender.
+
+Se resolvio con TRES capas, de la mas interna a la mas externa:
+
+1.1 Indice unico (id_medico, fecha, hora_inicio) en time_slots
+    Impide que existan dos franjas identicas. Protege sobre todo al generador
+    de slots: si se reejecuta, no duplica la agenda.
+
+1.2 Bloqueo pesimista al reservar
+    TimeSlotRepository.buscarParaReservar usa @Lock(PESSIMISTIC_WRITE), que
+    se traduce en SELECT ... FOR UPDATE, con timeout de 5 segundos.
+
+    Dos peticiones simultaneas quedan SERIALIZADAS: la segunda espera a que
+    la primera confirme y entonces ve el slot ya ocupado, de modo que recibe
+    409 HORARIO_OCUPADO, un error de dominio claro.
+
+    Se eligio pesimista y no optimista a proposito. Con solo @Version, la
+    segunda peticion fallaria con OptimisticLockingFailureException, un error
+    tecnico que el usuario no entiende y que no distingue "ya lo reservaron"
+    de "hubo un problema".
+
+1.3 Indice unico parcial ux_appointment_slot_activa
+    Sobre appointments(id_slot) WHERE estado IN ('SCHEDULED','CONFIRMED').
+    Es la red de seguridad si hubiera dos instancias del servicio. Es PARCIAL
+    para que, al anular una cita, el slot pueda reservarse de nuevo sin
+    chocar con la fila anulada.
+
+VERIFICADO con una carrera real: dos POST simultaneos sobre el mismo slot.
+  Peticion A -> RESERVADA cita 2
+  Peticion B -> RECHAZADA HORARIO_OCUPADO http 409
+  Base de datos: 1 sola cita viva sobre ese slot.
+
+
+--------------------------------------------------------------------------------
+2. OTRAS DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+2.1 Orden de los pasos al reservar
+    El paciente se valida ANTES de tomar el bloqueo. Llamar a patient-service
+    con el slot ya bloqueado mantendria el bloqueo abierto durante toda la
+    llamada de red y bloquearia a los demas durante cientos de milisegundos.
+
+2.2 Si patient-service no responde, NO se reserva
+    El fallback de Feign lanza PACIENTE_NO_VERIFICABLE (503). Reservar a
+    ciegas crearia una cita contra un paciente que quiza no existe o cuya
+    ficha esta cerrada, y habria que deshacerla a mano. Se prefiere rechazar
+    y que recepcion reintente.
+
+2.3 Las transiciones de estado viven en AppointmentStatus
+    siguientesValidos() las declara en un solo sitio. Repartirlas por el
+    servicio llevaria a que dos metodos se contradigan.
+
+2.4 NO_SHOW no libera la franja
+    El horario se consumio aunque el paciente no acudiera. Liberarlo
+    permitiria reservar una hora ya pasada.
+
+2.5 CANCELLED si la libera
+    Al anular con antelacion, la franja vuelve a estar disponible para otro
+    paciente, que es el objetivo de exigir un plazo minimo de cancelacion.
+
+2.6 EMERGENCY ocupa dos franjas CONSECUTIVAS
+    Se verifica que la siguiente empiece exactamente donde acaba la primera.
+    Si solo se comprobara que hay dos libres, la urgencia podria partirse en
+    dos tramos con otra cita en medio.
+
+2.7 La cita copia el nombre y el contacto del paciente
+    Duplicacion deliberada: evita llamar a patient-service para listar la
+    agenda del dia, que es la consulta mas frecuente, y deja constancia de
+    con que datos se reservo. Por eso PatientEventConsumer no actualiza las
+    citas ya creadas cuando el paciente cambia sus datos: la cita de la
+    semana pasada debe seguir mostrando con que telefono se reservo.
+
+2.8 La cache de Redis no es la fuente de verdad
+    Si Redis cae, invalidarCache traga la excepcion y la disponibilidad se
+    sigue leyendo de la base. Una cache caida no debe detener las reservas.
+
+
+--------------------------------------------------------------------------------
+3. PRUEBAS EJECUTADAS CONTRA EL STACK EN MARCHA
+--------------------------------------------------------------------------------
+
+  Configurar horario 09:00-12:00      201, 5 dias
+  Generacion de slots                 6 franjas de 30 min, 09:00 a 11:30
+  Dos reservas simultaneas            A reserva, B recibe 409 HORARIO_OCUPADO
+                                      1 sola cita viva en la base
+  Cita duplicada el mismo dia         409 CITA_DUPLICADA
+  Urgencia (EMERGENCY)                consume 2 slots: 4 libres -> 2
+  Completar una cita SCHEDULED        409 TRANSICION_NO_PERMITIDA
+  Confirmar y luego completar         CONFIRMED -> COMPLETED
+  Cancelar sin motivo                 400 VALIDACION_FALLIDA
+  Cancelar con menos de 24h           409 CANCELACION_FUERA_DE_PLAZO
+  Cancelar con antelacion             CANCELLED, el slot vuelve a estar libre
+                                      (5 libres -> 6)
+  Evento appointment.created          3 mensajes publicados
+  Evento appointment.cancelled        publicado con requestId cancela-ok y el
+                                      motivo de la cancelacion
+
+12 tests unitarios adicionales, todos en verde.
+
+
+--------------------------------------------------------------------------------
+4. PENDIENTE DE RESOLVER ANTES DE ESCALAR
+--------------------------------------------------------------------------------
+
+SlotGenerationScheduler se ejecutaria en TODAS las instancias si hubiera mas
+de una. La generacion de slots es idempotente y el indice unico la protege,
+pero el cierre de citas vencidas deberia coordinarse con ShedLock antes de
+levantar una segunda instancia del servicio.
+
+
+--------------------------------------------------------------------------------
+5. COMMITS DE ESTA SESION
+--------------------------------------------------------------------------------
+
+  eb53f6d  feat(appointment): citas, horarios y disponibilidad con control de doble reserva
+
+
+--------------------------------------------------------------------------------
+6. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] medical-service (:8084): atenciones, diagnosticos CIE-10 y ordenes de
+      laboratorio. Consume appointment.cancelled, publica lab-order.created
+  [ ] laboratory-service (:8085): muestras, resultados y HL7 con HAPI
+  [ ] inventory-service (:8086), analytics-service (:8087) y
+      notification-service (:8088)
+  [ ] Al implementar cada uno: anadir spring-boot-flyway y spring-boot-kafka,
+      descomentar su modulo en el POM padre y su bloque en docker-compose.yml
+  [ ] Completar medcore-commons: eventos de laboratorio e inventario,
+      DateUtil, QrCodeUtil y PdfUtil
+  [ ] Seeds de Postgres: cie10_seed.sql y lab_catalog_seed.sql
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
