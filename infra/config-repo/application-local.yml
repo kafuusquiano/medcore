@@ -1,0 +1,43 @@
+# ============================================================
+# Sobrescrituras COMUNES del perfil local.
+# Se aplica a todos los servicios cuando corren fuera de Docker,
+# donde las dependencias se alcanzan por localhost y en los
+# puertos que publica docker-compose.infra.yml.
+# ============================================================
+
+spring:
+  kafka:
+    # 29092 es el listener EXTERNAL del contenedor de Kafka.
+    # Dentro de la red de Compose se usa kafka:9092.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+  jpa:
+    hibernate:
+      # Las tablas las crea Flyway. validate falla el arranque si el
+      # esquema no coincide con las entidades, que es lo que se quiere.
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+  instance:
+    hostname: localhost
+    prefer-ip-address: false
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.medcore: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG

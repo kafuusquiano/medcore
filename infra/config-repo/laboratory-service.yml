@@ -1,0 +1,40 @@
+# laboratory-service (:8085) — muestras, resultados y HL7.
+# Base relacional lab_db mas MongoDB para resultados crudos y tramas HL7.
+# Consume lab-order.created. Publica sample.registered, result.registered
+# y result.critical.
+
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/lab_db
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+  data:
+    mongodb:
+      uri: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST:localhost}:${MONGO_PORT:27017}/lab_results_db?authSource=admin
+      auto-index-creation: false
+  kafka:
+    consumer:
+      group-id: laboratory-service
+
+laboratory:
+  hl7:
+    version: "2.5.1"
+    # Tipo de mensaje de resultados que envian los equipos.
+    mensaje-soportado: ORU^R01
+    # Si el parseo falla se responde con ACK de error (MSA con AE o AR),
+    # nunca con una excepcion sin ACK: el equipo quedaria reintentando.
+    ack-error-code: AE
+    max-tamano-mensaje-kb: 256
+  # Los valores criticos disparan result.critical ademas de result.registered.
+  notificar-criticos: true

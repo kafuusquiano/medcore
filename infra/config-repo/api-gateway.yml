@@ -1,0 +1,56 @@
+# api-gateway (:8080) — unico puerto expuesto al exterior.
+# Valida el JWT, propaga X-User-Id, X-User-Role y X-Request-Id (MC4),
+# aplica CORS y limita la tasa de peticiones con Redis.
+
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL:false}
+      timeout: 3s
+  cloud:
+    gateway:
+      server:
+        webflux:
+          discovery:
+            locator:
+              # Las rutas se declaran de forma explicita en RouteConfig,
+              # no se autogeneran desde Eureka.
+              enabled: false
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowed-origins: ${FRONTEND_ORIGIN:http://localhost:3000}
+                allowed-methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+                # ngrok-skip-browser-warning debe poder pasar, o el frontend
+                # recibe la pagina intersticial de ngrok en vez de JSON.
+                allowed-headers: "*"
+                exposed-headers: [X-Request-Id]
+                allow-credentials: true
+                max-age: 3600
+          httpclient:
+            connect-timeout: 10000
+            # Holgado a proposito: el primer acceso del dia puede encontrar
+            # un servicio recien arrancado y la JVM tarda en responder.
+            response-timeout: 60s
+
+gateway:
+  rate-limit:
+    # Peticiones por segundo por usuario, y pico admitido.
+    replenish-rate: 20
+    burst-capacity: 40
+    requested-tokens: 1
+  # Rutas que no exigen JWT (RouteValidator).
+  rutas-publicas:
+    - /api/auth/login
+    - /api/auth/refresh
+    - /actuator/health
+    - /v3/api-docs/**
+    - /swagger-ui/**
+    - /swagger-ui.html

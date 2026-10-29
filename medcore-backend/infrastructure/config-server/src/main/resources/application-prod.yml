@@ -1,0 +1,27 @@
+# ============================================================
+# config-server — perfil prod (dentro de docker-compose).
+#
+# Tambien en modo native: infra/config-repo se monta como volumen
+# de solo lectura en /config-repo. No se clona ningun repositorio
+# git, asi que no hay GITHUB_TOKEN que pueda expirar.
+#
+# Al cambiar un .yml basta con reiniciar el contenedor, o llamar a
+# POST /actuator/refresh en el servicio afectado.
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: ${CONFIG_REPO_LOCATION:file:/config-repo}
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+    org.springframework.cloud.config: WARN

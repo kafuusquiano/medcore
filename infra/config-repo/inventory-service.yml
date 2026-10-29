@@ -1,0 +1,25 @@
+# inventory-service (:8086) — reactivos, stock y alertas.
+# Publica stock.low y stock.expired.
+
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/inventory_db
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+
+inventory:
+  # Dias de antelacion con que se avisa de un reactivo por vencer.
+  alerta-vencimiento-dias: 30
+  # Revision diaria de stock y vencimientos, a las 06:00.
+  cron-revision: "0 0 6 * * *"

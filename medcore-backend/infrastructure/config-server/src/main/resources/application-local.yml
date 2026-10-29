@@ -1,0 +1,24 @@
+# ============================================================
+# config-server — perfil local (ejecucion fuera de Docker).
+#
+# search-locations apunta a infra/config-repo/ relativo a la raiz
+# del repositorio. La ruta se resuelve desde el directorio donde se
+# lanza la JVM, por eso se parametriza: al correr con
+# "mvn spring-boot:run" desde medcore-backend/ hay que subir un nivel.
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: ${CONFIG_REPO_LOCATION:file:../infra/config-repo}
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.springframework.cloud.config: INFO

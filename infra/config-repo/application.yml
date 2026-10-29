@@ -1,0 +1,91 @@
+# ============================================================
+# Configuracion COMUN a todos los microservicios de MedCore.
+# La sirve el config-server; cada servicio la recibe antes que
+# su propio {servicio}.yml, que puede sobrescribir lo que haga falta.
+#
+# Regla G4: aqui no se escriben credenciales. Solo ${VARIABLES}
+# que se resuelven desde .env o desde el entorno del contenedor.
+# ============================================================
+
+spring:
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: America/Lima
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        # Evita que un reintento duplique el evento.
+        enable.idempotence: true
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: com.medcore.commons.event
+    listener:
+      # Confirma el offset solo cuando el listener termina sin excepcion.
+      ack-mode: record
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    # Con estos valores Eureka detecta una instancia caida en ~15s,
+    # en lugar de los 90s por defecto.
+    lease-renewal-interval-in-seconds: 5
+    lease-expiration-duration-in-seconds: 15
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,refresh,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    probes:
+      enabled: true
+  info:
+    env:
+      enabled: true
+
+# Documentacion OpenAPI (regla G7). El gateway agrega la de todos
+# los servicios en un unico Swagger UI.
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+  refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000}
+
+logging:
+  pattern:
+    # X-Request-Id en cada linea, para seguir una operacion a traves
+    # de varios servicios (MC4).
+    level: "%5p [${spring.application.name:},%X{requestId:-}]"
+  level:
+    root: INFO
+    com.medcore: DEBUG

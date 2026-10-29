@@ -1,0 +1,27 @@
+# patient-service (:8082) — pacientes e historial clinico.
+# Publica patient.created y patient.updated.
+
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/patient_db
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+  kafka:
+    producer:
+      client-id: patient-service-producer
+
+patient:
+  # Tamano de pagina por defecto en las busquedas.
+  page-size: 20
+  max-page-size: 100

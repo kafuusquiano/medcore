@@ -1,0 +1,48 @@
+# ============================================================
+# config-server — configuracion comun a todos los perfiles.
+# La ruta de donde lee la configuracion cambia por perfil.
+# ============================================================
+
+spring:
+  application:
+    name: config-server
+  profiles:
+    default: local
+    # El perfil native activa el NativeEnvironmentRepository, que lee la
+    # configuracion de disco en lugar de clonar un repositorio git.
+    # Se declara como grupo y no con spring.profiles.active dentro de
+    # application-local.yml, porque Spring Boot prohibe fijar el perfil
+    # activo desde un archivo especifico de perfil.
+    group:
+      local: native
+      prod: native
+  cloud:
+    config:
+      server:
+        # Sin esto, un servicio que pide una configuracion inexistente recibe
+        # 404 y arranca sin valores en lugar de fallar de forma visible.
+        fail-fast: true
+
+server:
+  port: ${SERVER_PORT:8888}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://localhost:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,refresh
+  endpoint:
+    health:
+      show-details: when_authorized
+  health:
+    probes:
+      enabled: true

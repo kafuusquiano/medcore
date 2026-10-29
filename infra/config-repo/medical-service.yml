@@ -1,0 +1,27 @@
+# medical-service (:8084) — atenciones, diagnosticos CIE-10 y ordenes de laboratorio.
+# Consume appointment.cancelled. Publica lab-order.created.
+
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/medical_db
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+  kafka:
+    consumer:
+      group-id: medical-service
+
+medical:
+  # Version del catalogo CIE-10 cargado por los seeds.
+  cie10-version: "2019"
+  page-size: 20
