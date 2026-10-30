@@ -1,0 +1,14 @@
+# ============================================================
+# inventory-service — perfil local (ejecucion fuera de Docker).
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+logging:
+  level:
+    com.medcore.inventory: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG

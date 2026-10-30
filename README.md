@@ -270,7 +270,7 @@ La validación estricta de HAPI está desactivada a propósito: los equipos real
 
 ### MC8 — Trampas de Spring Boot 4 que no dan error de compilación
 
-Cuatro cambios de Spring Boot 4 y sus módulos que **se ignoran en silencio** o fallan solo en ejecución. Todos se encontraron levantando el stack real.
+Cinco trampas que **no dan error de compilación**: se ignoran en silencio, o fallan solo en ejecución y lejos de su causa. Todas se encontraron levantando el stack real.
 
 **1. Autoconfiguraciones partidas en módulos.** Hay que declarar explícitamente lo que antes venía en el starter:
 
@@ -324,6 +324,12 @@ Jackson 3 también sacó `WRITE_DATES_AS_TIMESTAMPS` de `SerializationFeature`: 
 public ByteArrayJsonMessageConverter jsonMessageConverter(ObjectMapper objectMapper) {
     return new ByteArrayJsonMessageConverter(objectMapper);
 }
+```
+
+**5. Tras añadir una clase a `medcore-commons`, reinstalarlo.** `mvn compile -am` construye el módulo desde el fuente, pero `mvn test -pl services/x` sin `-am` usa el JAR del repositorio local. Si está viejo, el fallo aparece lejos de la causa: un `MockitoException` sobre una clase del propio servicio, porque Byte Buddy no puede instrumentar una clase cuya dependencia falta en runtime.
+
+```bash
+mvn install -pl shared/medcore-commons -DskipTests
 ```
 
 ---
