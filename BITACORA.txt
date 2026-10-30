@@ -1854,3 +1854,306 @@ Con eureka, config-server, analytics-service, MongoDB y Kafka levantados:
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 09  -  30 de octubre de 2026
+Objetivo: notification-service. Con este se cierra el backend.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+notification-service (:8088). Es el consumidor con mas topicos del sistema,
+NUEVE, y no publica ninguno: es el extremo de todas las cadenas de eventos.
+
+  patient.created        -> bienvenida
+  appointment.created    -> confirmacion y recordatorio programado
+  appointment.cancelled  -> aviso de cancelacion
+  lab-order.created      -> indicaciones de la toma
+  sample.registered      -> muestra recibida, o rechazada al medico
+  result.registered      -> resultado disponible, SIN el valor
+  result.critical        -> valor critico al medico, CON el valor
+  stock.low              -> reponer reactivo
+  stock.expired          -> retirar lote
+
+Dos tablas en notification_db: notifications y notification_templates, con
+las 11 plantillas sembradas por la migracion. Nueve plantillas HTML de correo
+en resources/templates/email/.
+
+35 pruebas del servicio. CON ESTE SERVICIO EL BACKEND QUEDA COMPLETO:
+216 pruebas y los 8 microservicios activos en el POM.
+
+
+--------------------------------------------------------------------------------
+2. LA DECISION CLINICA MAS DELICADA DEL PROYECTO
+--------------------------------------------------------------------------------
+
+Un valor critico se avisa al MEDICO con el valor completo, y al paciente solo
+se le dice que su resultado esta disponible, sin el numero.
+
+El motivo: un resultado alarmante por correo, sin su rango, sin nadie que lo
+interprete y sin indicar que hacer, es peor que no avisar. El paciente se
+alarma o se tranquiliza por su cuenta, y las dos cosas son malas. Quien tiene
+que actuar hoy es el medico.
+
+Lo mismo con la muestra rechazada: va al medico, porque quien decide si hay
+que repetir la toma es el, y el paciente recibiria un aviso que no sabe que
+hacer con el.
+
+Verificado contra Mailpit: el correo al paciente no contiene ni el valor 11.2
+ni la palabra BAJO.
+
+
+--------------------------------------------------------------------------------
+3. DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+3.1 Los avisos nacen SOLO de eventos
+    No hay endpoint para crear un aviso. Si se pudieran crear por API,
+    cualquier cliente podria mandar un correo en nombre de la clinica, y el
+    aviso dejaria de corresponder con un hecho ocurrido en el sistema.
+
+3.2 Una fila por canal, no una por hecho
+    El aviso de cita reservada va por correo y tambien in-app, y cada uno se
+    envia, falla y se reintenta por separado. Con una sola fila y varios
+    canales habria que llevar un estado por canal dentro del registro, y
+    entonces "esta enviada" dejaria de tener una respuesta.
+
+3.3 Los avisos no se borran
+    Uno que no llego es justamente el que hay que poder consultar. El endpoint
+    /no-entregados es la consulta que de verdad importa en un sistema de
+    avisos: si el correo de un valor critico no salio, alguien tiene que verlo
+    y llamar por telefono.
+
+3.4 FALLIDA y OMITIDA son estados distintos
+    FALLIDA admite reintento: el servidor de correo estaba caido. OMITIDA no:
+    la direccion no existe, o el canal no esta implementado. Contar una
+    omision como fallo ensuciaria las cifras de entrega y gastaria tres
+    intentos en algo que no va a cambiar.
+
+3.5 El canal decide si su fallo es reintentable
+    Un sender no lanza excepcion: devuelve un Resultado que dice si salio y si
+    conviene reintentar. El fallo de un correo es un desenlace previsto, no un
+    error del programa.
+
+3.6 PUSH y SMS se declaran pero se rechazan
+    Firebase necesita un proyecto con credenciales y el SMS una pasarela con
+    contrato, y ninguna de las dos cosas existe en el proyecto. Se declaran en
+    el enum para que anadirlos sea escribir una clase y no migrar los datos
+    guardados, pero un envio por ellos se marca OMITIDA con el motivo.
+
+    Nada finge funcionar. Si se simulara un envio correcto, el sistema diria
+    que aviso cuando no lo hizo, que en un valor critico es peor que no tener
+    el canal. Decision consultada y confirmada.
+
+3.7 El in-app se guarda en la base, no se empuja por WebSocket
+    Un aviso que solo viaja por un socket abierto se pierde si el usuario no
+    esta conectado, que es justamente cuando hace falta que le llegue.
+    Guardarlo lo deja esperando hasta que entre. Anadir WebSocket despues es
+    notificar sobre lo que ya esta guardado, no sustituirlo.
+
+3.8 Los textos viven en la base; el HTML, en plantillas Thymeleaf
+    Los textos son lo que se corrige con el uso: una redaccion confusa, una
+    falta, un cambio de tono. El HTML va en archivos porque maquetar dentro de
+    una columna de texto seria ilegible, y Thymeleaf ademas escapa los datos
+    que vienen de los eventos, que aqui son nombres de pacientes y motivos
+    escritos por una persona.
+
+    Los correos usan tablas y estilos en linea, no CSS externo ni flexbox: los
+    clientes de correo descartan las hojas de estilo y muchos no soportan
+    flex. Es feo para una pagina web y es lo unico que funciona en un correo.
+
+3.9 Un marcador sin valor queda VISIBLE
+    Si el texto sale con un {nombrePaciente} a la vista, se ve que falta un
+    dato y se corrige. Un "null" en medio de un correo parece un error del
+    sistema y no dice que falta.
+
+3.10 Los datos del evento se guardan en el aviso
+    En una columna de texto con JSON. Hace falta porque un reintento puede
+    ocurrir horas despues, incluso tras reiniciar el servicio, y entonces el
+    consumidor que los tenia en memoria ya no existe: el correo reintentado
+    saldria con los huecos de la plantilla vacios.
+
+3.11 La idempotencia es por (evento, tipo, canal)
+    Con indice unico. Kafka entrega al menos una vez, y sin esto un reenvio
+    mandaria el mismo correo dos veces al paciente. El recordatorio de cita
+    sufija su eventId porque es un aviso DISTINTO del mismo hecho.
+
+3.12 Hay un buzon interno configurable
+    Porque NINGUN evento trae el correo del medico ni del laboratorista: los
+    eventos llevan su identificador, no su direccion, y pedirsela a
+    auth-service en cada aviso acoplaria este servicio a otro para un dato que
+    no cambia. El aviso in-app si llega a la persona concreta, por su id.
+
+
+--------------------------------------------------------------------------------
+4. TRES ERRORES PROPIOS, TODOS DETECTADOS CONTRA EL STACK REAL
+--------------------------------------------------------------------------------
+
+4.1 Los avisos quedaban PENDIENTE sin enviarse
+    Sintoma: 17 de 18 avisos en PENDIENTE tras publicar los nueve eventos.
+    Ningun error en el log.
+
+    Causa: el servicio llamaba al dispatcher dentro de la misma transaccion
+    que acababa de insertar el aviso. El dispatcher entrega con
+    @Transactional(REQUIRES_NEW), que abre una transaccion NUEVA y por tanto
+    no ve las filas que la otra todavia no ha confirmado: su findById no
+    encontraba el aviso y devolvia NO_PROCESADO.
+
+    Es el mismo tipo de error que el de auth-service en la sesion 03, pero al
+    reves: alli el problema fue que el rollback se llevaba el contador, y aqui
+    que la transaccion nueva no ve lo no confirmado.
+
+    Corregido entregando tras el commit, con TransactionSynchronization, igual
+    que los demas servicios publican sus eventos. Tras el arreglo: 16 enviados
+    en el acto y 1 pendiente, que es el recordatorio programado a tres dias.
+
+4.2 Los avisos del almacen nunca llegaban a nadie
+    Sintoma: todos los STOCK_BAJO en OMITIDA, con el motivo "El aviso in-app
+    no indica a que paciente ni a que usuario corresponde".
+
+    Causa: STOCK_BAJO tenia IN_APP como unico canal, pero los eventos de
+    inventario no traen usuario ni paciente, porque el almacen no tiene
+    responsable asignado en el modelo. Un aviso in-app sin destinatario no
+    aparece en ninguna bandeja.
+
+    Corregido: STOCK_BAJO y LOTE_VENCIDO van solo por correo, al buzon
+    interno. Para que fueran tambien in-app haria falta poder dirigir un aviso
+    a un ROL y no a una persona, que queda anotado como mejora.
+
+4.3 EL VALOR CRITICO APARECIA EN LA BANDEJA DEL PACIENTE
+    Es el mas grave de los tres, porque contradice la decision clinica
+    principal del servicio.
+
+    Sintoma: la bandeja del paciente 7 mostraba "Valor critico: Potasio en
+    Lucia Ramos Diaz". El correo si iba bien al medico.
+
+    Causa: el evento result.critical trae el paciente al que se refiere Y el
+    medico al que avisar. El servicio guardaba los dos identificadores y
+    resolvia el destino in-app priorizando el paciente, sin mirar si el tipo
+    de aviso era para el o para el personal.
+
+    Corregido en dos puntos: un aviso de tipo INTERNO no guarda el
+    identificador del paciente, y el destino in-app atiende al destinatario
+    del tipo antes que al orden de los campos. El nombre del paciente sigue en
+    el texto, que es lo que el medico necesita leer.
+
+    Verificado tras el arreglo: el paciente ve 5 avisos informativos y ninguno
+    critico; el medico ve los dos valores criticos y las dos muestras
+    rechazadas.
+
+    Hay un test por cada uno de los tres errores, para que no vuelvan.
+
+
+--------------------------------------------------------------------------------
+5. UNA TRAMPA DEL PROCEDIMIENTO, NO DEL CODIGO
+--------------------------------------------------------------------------------
+
+Tras aplicar el arreglo 4.3 la fuga seguia apareciendo. El codigo estaba bien:
+el JAR en ejecucion era anterior al arreglo.
+
+Un "mvn package" lanzado mientras el servicio todavia tenia el JAR abierto no
+lo reemplaza, y no siempre falla de forma visible. Se confirmo comparando la
+hora del JAR con la del fuente, y despues verificando que la clase
+empaquetada contenia el metodo nuevo.
+
+REGLA: tras un arreglo, parar el servicio, BORRAR el jar, reempaquetar y
+comprobar que el jar es posterior al fuente antes de volver a probar. Es la
+misma familia de problemas que los jar bloqueados de la sesion 05.
+
+
+--------------------------------------------------------------------------------
+6. PRUEBAS EJECUTADAS CONTRA EL STACK REAL
+--------------------------------------------------------------------------------
+
+Con eureka, config-server, notification-service, Postgres, Kafka y Mailpit:
+
+  [ok] Health UP con db y mail; 11 plantillas cargadas, 9 con HTML
+  [ok] Los NUEVE topicos asignados al grupo, 9 listeners arrancados
+  [ok] Canales disponibles: EMAIL e IN_APP
+  [ok] 10 eventos publicados -> 17 avisos creados, 16 enviados en el acto
+  [ok] 9 correos entregados en Mailpit, cada uno a su destinatario:
+         5 a lucia.ramos@correo.local   (paciente)
+         4 a laboratorio@medcore.local  (personal)
+  [ok] El correo de valor critico lleva paciente, documento, analisis, valor y
+       muestra, con las 5 filas de la plantilla resueltas y 0 sin resolver
+  [ok] El correo al paciente NO contiene el valor 11.2 ni la palabra BAJO
+  [ok] La bandeja del paciente tiene 5 avisos y NINGUN valor critico
+  [ok] La bandeja del medico tiene los criticos y las muestras rechazadas
+  [ok] Marcar leido: el aviso pasa a LEIDA con su hora, y el contador de sin
+       leer baja de 5 a 4
+  [ok] El recordatorio de cita queda PENDIENTE, programado a 3 dias
+  [ok] Resumen de entrega: 106 enviados, 0 fallidos, 59 omitidos, 0 perdidos
+
+  Casos de error:
+    aviso inexistente           404 AVISO_NO_ENCONTRADO
+    marcar leido un correo      409 SOLO_IN_APP
+
+
+--------------------------------------------------------------------------------
+7. LIMITACIONES ANOTADAS
+--------------------------------------------------------------------------------
+
+  ReminderScheduler necesitaria ShedLock antes de escalar a mas de una
+  instancia: las dos procesarian la misma cola y un aviso podria enviarse dos
+  veces. El bloqueo optimista lo reduce, porque la segunda choca al guardar,
+  pero el correo ya habria salido. Es la misma limitacion que los otros tres
+  schedulers del sistema.
+
+  El enlace de los correos es una ruta del frontend, y el servicio no conoce
+  su URL publica. Hasta configurarla, el boton del correo solo funciona si el
+  cliente lo resuelve contra un dominio conocido.
+
+  No se puede dirigir un aviso a un ROL, solo a una persona o a un buzon. Por
+  eso los avisos del almacen van solo por correo.
+
+  El recordatorio de cita no se cancela cuando la cita se anula: queda
+  programado y saldra igual. Hace falta que el consumidor de
+  appointment.cancelled marque como OMITIDO el recordatorio pendiente de esa
+  cita.
+
+
+--------------------------------------------------------------------------------
+8. ESTADO DEL PROYECTO: BACKEND COMPLETO
+--------------------------------------------------------------------------------
+
+  Los 8 microservicios y los 3 de infraestructura, con sus 216 pruebas:
+
+    api-gateway          8080   enrutamiento, JWT, rate limit
+    eureka-server        8761   service discovery
+    config-server        8888   configuracion centralizada
+    auth-service         8081   18 pruebas
+    patient-service      8082   10
+    appointment-service  8083   12
+    medical-service      8084   12
+    laboratory-service   8085   65
+    inventory-service    8086   37
+    analytics-service    8087   27
+    notification-service 8088   35
+
+  Los 9 topicos de Kafka en uso, con productores y consumidores reales a los
+  dos lados de cada uno.
+
+
+--------------------------------------------------------------------------------
+9. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] Levantar el stack COMPLETO con docker compose y probar el recorrido de
+      punta a punta por el gateway: login, paciente, cita, atencion, orden,
+      muestra, resultado critico y aviso. Hasta ahora cada servicio se ha
+      probado contra la infraestructura, pero nunca los ocho a la vez
+  [ ] Cancelar el recordatorio de cita cuando la cita se anula
+  [ ] medical-service deberia publicar diagnosis.registered, para que
+      analytics vigile por codigo CIE-10 y no solo por prueba de laboratorio
+  [ ] Conectar el consumo de reactivos con laboratory-service: el endpoint de
+      inventory ya existe, falta decidir si por Feign o por evento
+  [ ] Completar medcore-commons: DateUtil, QrCodeUtil y PdfUtil
+  [ ] Alinear el seed de medical-service con el catalogo del laboratorio
+  [ ] Seeds de Postgres: cie10_seed.sql completo y lab_catalog_seed.sql
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+  [ ] AL FINAL: la guia del sistema que se pidio al empezar el proyecto
+
+================================================================================
