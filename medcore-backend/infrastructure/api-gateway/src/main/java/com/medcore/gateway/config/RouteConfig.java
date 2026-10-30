@@ -39,16 +39,27 @@ public class RouteConfig {
                         .path("/api/medical/**", "/api/diagnoses/**", "/api/lab-orders/**")
                         .uri("lb://medical-service"))
 
+                // Las rutas tienen que coincidir con el @RequestMapping de cada
+                // controlador. Una ruta que ningun controlador atiende no da
+                // error al arrancar: el gateway la acepta, enruta, y el
+                // servicio responde 404 como si el endpoint no existiera.
+                //
+                // /api/hl7 NO se publica aqui a proposito: los analizadores
+                // escriben al puerto del servicio y no saben enviar un JWT, asi
+                // que esa ruta se protege por red y nunca por el gateway.
                 .route("laboratory-service", r -> r
-                        .path("/api/lab/**", "/api/samples/**", "/api/results/**")
+                        .path("/api/lab-catalog/**", "/api/lab-queue/**",
+                                "/api/samples/**", "/api/results/**")
                         .uri("lb://laboratory-service"))
 
                 .route("inventory-service", r -> r
-                        .path("/api/inventory/**", "/api/reagents/**")
+                        .path("/api/reagents/**", "/api/stock/**",
+                                "/api/movements/**")
                         .uri("lb://inventory-service"))
 
                 .route("analytics-service", r -> r
-                        .path("/api/analytics/**", "/api/epidemiology/**")
+                        .path("/api/reports/**", "/api/trends/**",
+                                "/api/epidemiology/**")
                         .uri("lb://analytics-service"))
 
                 .route("notification-service", r -> r
