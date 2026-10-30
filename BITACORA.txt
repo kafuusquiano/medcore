@@ -1294,3 +1294,275 @@ MongoDB y Kafka levantados:
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 07  -  29 de octubre de 2026
+Objetivo: inventory-service, reactivos y stock por lote.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+inventory-service (:8086), con dos migraciones y tres tablas:
+
+  reagents       el articulo en abstracto; 18 reactivos e insumos sembrados
+  stock          el lote fisico, con su numero de lote y su vencimiento
+  movement_logs  auditoria de cada movimiento
+
+37 pruebas del servicio, 154 en todo el backend.
+
+Tambien se completo InventoryEvent en medcore-commons, que estaba pendiente
+desde la sesion 02.
+
+
+--------------------------------------------------------------------------------
+2. DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+2.1 El stock se lleva por LOTE, no por reactivo
+    Es la decision que ordena todo el servicio. El mismo reactivo llega en
+    varias remesas con vencimientos distintos, hay que gastar primero el que
+    caduca antes, y cuando un lote sale defectuoso el proveedor lo reclama
+    por su numero de lote, no por el total del almacen.
+
+    Con una sola tabla no se sabria que parte del total esta por vencer, que
+    es justamente lo que el laboratorio necesita saber.
+
+2.2 La cantidad cambia SOLO registrando un movimiento
+    No hay ningun endpoint que edite una cantidad directamente, ni siquiera
+    para el ingreso inicial del lote: ese tambien deja su movimiento de
+    ENTRADA. Es lo que garantiza que el stock actual y el historial nunca
+    puedan discrepar.
+
+    Verificado contra la base: el historial del lote 2 encadena
+    0 -> 10 -> 8 -> 3 -> 5 -> 4, y cada fila lleva la cantidad antes y
+    despues.
+
+2.3 Los movimientos no se editan ni se borran
+    Un error se corrige con un AJUSTE que deja constancia de la diferencia.
+    Es la auditoria de un inventario de material sanitario.
+
+    Por eso cada fila guarda cantidad_anterior y cantidad_resultante, no solo
+    el delta: un recuento que no cuadra se rastrea hasta el movimiento exacto
+    en que la cuenta se desvio, sin sumar toda la cadena desde el principio.
+
+2.4 El signo lo pone el TIPO de movimiento, no quien llama
+    MovementType.deltaDe() centraliza la conversion. Una SALIDA resta aunque
+    llegue como -3, para que un cliente descuidado no acabe sumando material
+    inventado. El AJUSTE es la unica excepcion: corrige en cualquier
+    direccion tras un recuento fisico, y es el unico que admite negativo.
+
+2.5 La situacion de un lote se CALCULA, no se guarda
+    VENCIDO, AGOTADO, POR_VENCER, BAJO o DISPONIBLE salen de la cantidad, del
+    minimo del reactivo y de la fecha de vencimiento.
+
+    Guardarla obligaria a recalcular la columna cada medianoche, porque un
+    lote pasa a vencido sin que nadie lo toque, y una fila desactualizada
+    diria que hay material usable cuando ya no lo es.
+
+    El orden de comprobacion importa: vencido manda sobre todo, y agotado
+    sobre bajo minimo.
+
+2.6 POR_VENCER y BAJO siguen siendo usables
+    Son avisos, no impedimentos. Un lote por vencer es justamente el que
+    conviene gastar primero.
+
+2.7 Un lote vencido no se consume, pero SI se merma
+    Consumirlo daria un resultado clinico que no se puede respaldar. Pero hay
+    que poder mermarlo o devolverlo al proveedor, que es lo que toca hacer
+    con el. Verificado: la SALIDA se rechaza con LOTE_VENCIDO y la MERMA pasa.
+
+2.8 Retirar un lote no pone su cantidad a cero
+    Para eso se registra una MERMA, que deja constancia de cuantas unidades
+    se perdieron. Separar las dos cosas permite saber si un lote se retiro
+    lleno o ya casi gastado.
+
+2.9 El consumo reparte entre lotes por orden de vencimiento
+    El laboratorio pide "6 unidades de REA-HEM-01" sin elegir el lote: esa
+    decision la toma el sistema, que es donde conviene que este.
+
+    Si el total no alcanza, no consume NADA. Un consumo a medias dejaria
+    material apuntado como gastado sin haber podido hacer la prueba, y habria
+    que deshacerlo a mano.
+
+    Verificado: pedir 6 con lotes de 4 y 10 agoto el que caduca antes y tomo
+    2 del siguiente.
+
+2.10 Bloqueo PESIMISTA para mover stock
+    Dos tecnicos pueden descontar del mismo lote a la vez. El bloqueo
+    optimista de @Version lo detectaria, pero haria fallar al segundo con un
+    conflicto que para el no significa nada: el material esta ahi y solo
+    quiere apuntar que lo saco. Con el pesimista espera y su movimiento se
+    aplica sobre la cantidad ya actualizada.
+
+    Timeout de 5 segundos, para que una transaccion colgada no deje el
+    almacen bloqueado.
+
+2.11 El aviso de stock bajo sale en cada movimiento, no solo de noche
+    Si un consumo agota el reactivo a media manana, esperar a la revision del
+    dia siguiente es esperar demasiado.
+
+    El total se recalcula con una consulta de agregacion y no con la cantidad
+    del lote: lo que importa es cuanto queda EN TOTAL, porque puede haber
+    otros lotes del mismo reactivo.
+
+2.12 El total disponible descarta lo vencido y lo retirado
+    Un almacen lleno de material caducado no es stock. La consulta lo filtra,
+    de modo que un reactivo con 50 unidades todas vencidas aparece bajo
+    minimo, que es la verdad operativa.
+
+2.13 El minimo es por reactivo
+    De uno de uso diario hay que tener mucho mas que de uno que se usa una
+    vez al mes. El stock_optimo no es un maximo que el sistema imponga: es la
+    referencia que se muestra a quien hace el pedido, con la cantidad
+    sugerida ya calculada.
+
+2.14 Dos topicos y no uno con una marca
+    stock.low es un aviso para reponer; stock.expired obliga a retirar
+    material de la estanteria antes de que alguien lo use. Exigen reacciones
+    distintas y pueden tener su propia configuracion de reintentos.
+
+    El lote por vencer y el ya vencido comparten topico y se distinguen por
+    diasParaVencer, que es negativo si ya vencio.
+
+2.15 Un reactivo descatalogado se desactiva, no se borra
+    Sus movimientos historicos tienen que seguir siendo legibles, y los lotes
+    que queden en la estanteria tambien: la baja impide registrar material
+    nuevo, no consultar lo que ya hay. Si queda material, se avisa en el log.
+
+2.16 El codigo del reactivo no es modificable
+    Esta rotulado en la estanteria y copiado en los movimientos ya
+    registrados. Si llega otro en una actualizacion, se ignora y queda en el
+    log en lugar de cambiarlo en silencio.
+
+2.17 El movimiento copia el codigo, el nombre y el lote
+    Duplicacion deliberada: el historial debe poder leerse e imprimirse sin
+    cargar el lote ni el reactivo, y seguir legible si el reactivo se da de
+    baja del catalogo.
+
+
+--------------------------------------------------------------------------------
+3. UN ERROR PROPIO Y UNA TRAMPA DEL ENTORNO
+--------------------------------------------------------------------------------
+
+3.1 El seed de V1 no rellenaba las columnas de fecha
+    Sintoma: el servicio no arrancaba.
+      ERROR: null value in column "fecha_creacion" of relation "reagents"
+      violates not-null constraint
+      Failed to execute script V1__create_reagents.sql
+
+    Las columnas son NOT NULL y la aplicacion las rellena en @PrePersist, que
+    no interviene en un INSERT por SQL. El seed de 18 reactivos las dejaba
+    vacias.
+
+    Corregido con DEFAULT now() en las columnas de fecha de las tres tablas.
+    El default solo actua en las cargas por SQL; la aplicacion sigue fijando
+    la hora en @PrePersist.
+
+    Flyway hizo rollback de la transaccion, asi que no quedo historial fallido
+    que limpiar: bastó corregir el SQL y reiniciar.
+
+3.2 Mockito no podia mockear una clase del propio servicio
+    Sintoma, en 16 de los 16 tests del servicio:
+      Mockito cannot mock this class:
+      class com.medcore.inventory.event.producer.InventoryEventProducer
+      Byte Buddy could not instrument all classes within the mock's type
+      hierarchy
+
+    El mensaje apunta a Byte Buddy y hace pensar en un problema del agente de
+    instrumentacion, pero la causa era otra: InventoryEventProducer
+    referencia InventoryEvent, recien creada en medcore-commons, y el JAR
+    INSTALADO de commons en el repositorio local todavia no la tenia.
+
+    La compilacion no fallaba porque "mvn compile -am" construye commons desde
+    el fuente; "mvn test -pl" sin -am usa el jar instalado, que estaba viejo.
+
+    Solucion: mvn install -pl shared/medcore-commons -DskipTests
+
+    REGLA PARA LAS PROXIMAS SESIONES: tras anadir una clase a
+    medcore-commons, reinstalarlo antes de correr los tests de un servicio
+    suelto. Un error de Mockito que no tiene sentido suele ser esto.
+
+
+--------------------------------------------------------------------------------
+4. PRUEBAS EJECUTADAS CONTRA EL STACK REAL
+--------------------------------------------------------------------------------
+
+Con eureka, config-server, inventory-service, Postgres y Kafka levantados:
+
+  [ok] Las 2 migraciones aplicadas; 18 reactivos sembrados en 5 categorias
+  [ok] Los 18 reactivos sin lotes aparecen bajo minimo con cantidad sugerida
+       (el subquery cubre el caso de cero lotes, que es el mas urgente)
+  [ok] Dos lotes del mismo reactivo con vencimientos distintos:
+       uno a 17 dias -> "Por vencer", otro a 244 -> "Disponible"
+  [ok] Consumir 6 con lotes de 4 y 10 -> agota el que caduca antes (-4) y
+       toma 2 del siguiente
+  [ok] Consumir 5 mas deja 3 con minimo 4 -> stock.low publicado en Kafka
+       con cantidadSugerida 9 y el proveedor
+  [ok] Lote ya vencido: situacion "Vencido", dias -29, consumible false
+  [ok] SALIDA sobre lote vencido -> rechazada con LOTE_VENCIDO
+  [ok] MERMA sobre lote vencido -> permitida, 6 -> 0
+  [ok] Revision a demanda: 18 bajo minimo, 1 vencido, 0 por vencer
+       (el lote por vencer quedo agotado, y un lote sin unidades no necesita
+       aviso de vencimiento)
+  [ok] stock.expired publicado con lote, dias y ubicacion
+  [ok] AJUSTE al alza (+2) y a la baja (-1) tras recuento fisico
+  [ok] Historial del lote encadenado: 0 -> 10 -> 8 -> 3 -> 5 -> 4
+  [ok] Trazabilidad inversa: la muestra MUE-20261029-0002 consumio de los
+       dos lotes
+  [ok] Consumo de REA-HEM-01 en 30 dias: 11 unidades
+
+  Casos de error:
+    lote duplicado                  409 LOTE_DUPLICADO
+    vencimiento antes del ingreso   400 VENCIMIENTO_INVALIDO
+    consumo mayor que el total      409 SIN_STOCK_DISPONIBLE
+    merma sin motivo                400 MOTIVO_REQUERIDO
+    salida con cantidad negativa    400 CANTIDAD_NEGATIVA_NO_PERMITIDA
+    salida mayor que el lote        409 STOCK_INSUFICIENTE
+    reactivo inexistente            404 REACTIVO_NO_ENCONTRADO
+    retiro sin motivo               400 VALIDACION_FALLIDA
+
+
+--------------------------------------------------------------------------------
+5. LIMITACIONES ANOTADAS
+--------------------------------------------------------------------------------
+
+  ExpirationCheckScheduler necesitaria ShedLock antes de escalar a mas de una
+  instancia: las dos correrian la revision y los avisos saldrian duplicados.
+  Es la misma limitacion que SlotGenerationScheduler en appointment-service.
+
+  El consumo reparte entre lotes dentro de una sola transaccion, tomando cada
+  lote con bloqueo pesimista uno tras otro. Con muchos lotes pequenos y
+  consumos simultaneos del mismo reactivo, el orden de bloqueo podria
+  provocar esperas; no hay riesgo de interbloqueo porque todos los recorren
+  en el mismo orden (vencimiento ascendente).
+
+
+--------------------------------------------------------------------------------
+6. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] analytics-service (:8087): epidemiologia sobre MongoDB. Consume
+      result.registered y result.critical. Usar spring.mongodb.* (MC8)
+  [ ] notification-service (:8088): el consumidor con mas topicos. Consume
+      patient.created, appointment.created, appointment.cancelled,
+      lab-order.created, sample.registered, result.registered,
+      result.critical, stock.low y stock.expired
+  [ ] Al implementar cada uno: anadir spring-boot-flyway y spring-boot-kafka,
+      el bean ByteArrayJsonMessageConverter, NO declarar Acknowledgment en los
+      listeners, declarar los indicadores de los DTOs como Boolean, y
+      reinstalar medcore-commons si se le anade alguna clase
+  [ ] Completar medcore-commons: DateUtil, QrCodeUtil y PdfUtil
+  [ ] Alinear el seed de medical-service para que pida codigos que existan en
+      el catalogo del laboratorio
+  [ ] Seeds de Postgres: cie10_seed.sql completo y lab_catalog_seed.sql
+  [ ] Conectar el consumo de reactivos con laboratory-service: hoy el
+      laboratorio no descuenta material al procesar una muestra. El endpoint
+      ya existe (POST /api/movements/consumo/reactivo/{id} con el codigo de
+      muestra), falta decidir si lo llama laboratory por Feign o si se hace
+      por evento
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
