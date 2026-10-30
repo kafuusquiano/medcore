@@ -38,7 +38,18 @@ spring:
 notification:
   remitente: "no-responder@medcore.local"
   remitente-nombre: "MedCore"
+  # Buzon de la clinica para los avisos del personal: valor critico, muestra
+  # rechazada, lote vencido. Hace falta porque ningun evento trae el correo
+  # del medico ni del laboratorista, solo su identificador, y pedirselo a
+  # auth-service en cada aviso acoplaria este servicio a otro para un dato que
+  # no cambia. El aviso in-app si llega a la persona concreta, por su id.
+  correo-interno: "laboratorio@medcore.local"
   # Reintentos de envio ante fallo del servidor de correo.
   max-reintentos: 3
   # Los resultados criticos se envian de inmediato, sin agrupar.
   criticos-inmediatos: true
+  # Procesado de la cola de envio cada minuto: recoge lo que fallo y lo
+  # programado cuya hora ya llego.
+  cron-envio: "0 * * * * *"
+  # Recordatorios de cita, una vez al dia a las 08:00.
+  cron-recordatorios: "0 0 8 * * *"

@@ -332,6 +332,14 @@ public ByteArrayJsonMessageConverter jsonMessageConverter(ObjectMapper objectMap
 mvn install -pl shared/medcore-commons -DskipTests
 ```
 
+Y si un arreglo parece no surtir efecto, comprueba que el JAR en ejecución lo tiene: un `mvn package` lanzado mientras el servicio mantiene el JAR abierto no siempre lo reemplaza ni falla de forma visible.
+
+```bash
+# Parar el servicio, borrar el jar y reempaquetar
+rm -f services/x-service/target/x-service-1.0.0-SNAPSHOT.jar
+mvn -q package -pl services/x-service -DskipTests
+```
+
 **6. En Spring Data MongoDB, `Between` es EXCLUSIVO.** El mismo nombre de método derivado se comporta distinto según el módulo: en JPA genera un `BETWEEN` de SQL, que incluye los límites; en Mongo genera `$gt` y `$lt`, que los dejan fuera.
 
 Con rangos de fechas eso descarta el primer y el último día de cada ventana, sin ningún error. Se detectó en `analytics-service`: la detección de brotes contaba 0 casos donde la agregación contaba 6, porque todos eran de hoy, que es justo el límite superior. Afectaba también a todos los recuentos de los informes.

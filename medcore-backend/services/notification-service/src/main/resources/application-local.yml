@@ -1,0 +1,20 @@
+# ============================================================
+# notification-service - perfil local (ejecucion fuera de Docker).
+#
+# El correo sale a Mailpit, en el puerto 1025. Los mensajes se leen en
+# http://localhost:8025 sin configurar nada mas.
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+logging:
+  level:
+    com.medcore.notification: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+    # El protocolo SMTP completo solo al depurar un envio que no sale: incluye
+    # el cuerpo del correo, con datos del paciente.
+    org.springframework.mail: INFO

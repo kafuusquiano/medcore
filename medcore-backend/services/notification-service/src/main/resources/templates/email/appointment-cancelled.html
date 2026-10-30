@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${asunto}">MedCore</title>
+</head>
+<!-- Estilos en linea y tablas, no CSS externo ni flexbox: los clientes de
+     correo descartan las hojas de estilo y muchos no soportan flex. Es feo
+     para una pagina web y es lo unico que funciona en un correo. -->
+<body style="margin:0;padding:0;background-color:#f4f6f8;
+             font-family:Arial,Helvetica,sans-serif;color:#1f2933;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="background-color:#f4f6f8;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+               style="max-width:560px;background-color:#ffffff;border-radius:8px;
+                      border:1px solid #e4e7eb;overflow:hidden;">
+
+          <tr>
+            <td style="background-color:#b45309;padding:20px 24px;">
+              <p style="margin:0;font-size:18px;font-weight:bold;color:#ffffff;"
+                 th:text="${remitenteNombre}">MedCore</p>
+              <p style="margin:4px 0 0;font-size:13px;color:#eef2f6;">Cita cancelada</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px;">
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.6;"><span th:text="${mensaje}">Mensaje del aviso</span></p>
+              <table role="presentation" width="100%" cellpadding="0"
+                     cellspacing="0" style="margin:0 0 8px;">
+                <tr>
+                  <td style="font-size:13px;color:#7b8794;width:40%;">Fecha anulada</td>
+                  <td style="font-size:14px;font-weight:bold;"
+                      th:text="${datos['fecha']}">-</td>
+                </tr>
+              </table>
+              <table role="presentation" width="100%" cellpadding="0"
+                     cellspacing="0" style="margin:0 0 8px;">
+                <tr>
+                  <td style="font-size:13px;color:#7b8794;width:40%;">Hora</td>
+                  <td style="font-size:14px;font-weight:bold;"
+                      th:text="${datos['hora']}">-</td>
+                </tr>
+              </table>
+              <table role="presentation" width="100%" cellpadding="0"
+                     cellspacing="0" style="margin:0 0 8px;">
+                <tr>
+                  <td style="font-size:13px;color:#7b8794;width:40%;">Motivo</td>
+                  <td style="font-size:14px;font-weight:bold;"
+                      th:text="${datos['motivo']}">-</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr th:if="${enlace != null}">
+            <td style="padding:0 24px 24px;">
+              <!-- El enlace se deja tal como viene de la plantilla, que es una
+                   ruta del frontend. El servicio no conoce la URL publica del
+                   frontend; configurarla aqui es una mejora pendiente, y hasta
+                   entonces el enlace solo funciona si el cliente de correo lo
+                   resuelve contra un dominio conocido. -->
+              <a th:href="${enlace}"
+                 style="display:inline-block;background-color:#b45309;color:#ffffff;
+                        text-decoration:none;padding:11px 20px;border-radius:6px;
+                        font-size:14px;font-weight:bold;">Reservar otra cita</a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e4e7eb;
+                       padding:16px 24px;">
+              <p style="margin:0;font-size:12px;color:#7b8794;line-height:1.5;">
+                Este es un mensaje automatico de MedCore. No responda a esta
+                direccion.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
