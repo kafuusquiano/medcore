@@ -1566,3 +1566,291 @@ Con eureka, config-server, inventory-service, Postgres y Kafka levantados:
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 08  -  29 de octubre de 2026
+Objetivo: analytics-service, epidemiologia y deteccion de brotes.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+analytics-service (:8087). Es el unico servicio que NO usa Postgres: solo
+MongoDB, sin JPA ni Flyway, porque sus datos son series y agregados y no
+entidades relacionadas.
+
+Tres colecciones en analytics_db:
+  epidemiological_records  el caso individual, uno por resultado recibido
+  outbreak_alerts          alertas de posible brote
+  indicator_snapshots      fotos de indicadores archivadas
+
+27 pruebas del servicio, 181 en todo el backend.
+
+Tambien se genero resources/geo/centroides-lima-callao.geojson con 43
+distritos de Lima y Callao, para situar las zonas en el mapa de calor.
+
+
+--------------------------------------------------------------------------------
+2. LA DECISION QUE CONDICIONA EL SERVICIO
+--------------------------------------------------------------------------------
+
+La vigilancia es por PRUEBA DE LABORATORIO con resultado anormal, no por
+codigo CIE-10.
+
+El motivo no es de diseno sino de datos disponibles: se comprobo que
+medical-service solo publica appointment.cancelled y lab-order.created. No
+publica ningun evento de diagnostico, asi que analytics no tiene acceso a los
+codigos CIE-10 por mas que existan en medical_db. Consultar esa base seria
+romper MC1.
+
+La senal sigue siendo util: "cinco casos de proteina C reactiva alta en la
+misma zona en siete dias" indica un posible brote sin necesidad del
+diagnostico. Cuando medical-service publique diagnosis.registered, basta con
+anadir codigoCie10 al documento y una segunda regla de deteccion; queda
+anotado como pendiente.
+
+
+--------------------------------------------------------------------------------
+3. DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+3.1 Se cuentan PACIENTES DISTINTOS, no resultados
+    A una persona a la que se repite la prueba tres veces en la semana no se
+    la puede contar como tres casos, o cualquier seguimiento pareceria un
+    brote. La agregacion usa $addToSet sobre el DNI y luego $size.
+
+    Verificado contra la base: cinco resultados anormales del MISMO paciente
+    en Comas no abrieron alerta; cinco de pacientes distintos, si.
+
+3.2 El documento NO guarda el nombre del paciente
+    Para contar casos por zona basta el documento, que sirve para no contar
+    dos veces a la misma persona. Reducir lo que se copia limita lo que se
+    expone si esta base se consulta para un informe.
+
+3.3 La idempotencia es por idResultado, con indice unico
+    Kafka entrega al menos una vez, y un caso contado doble falsea la
+    vigilancia entera. El indice unico en Mongo es la garantia; el servicio
+    comprueba antes para no depender de la excepcion, y atrapa
+    DuplicateKeyException para el caso de dos consumidores a la vez.
+
+3.4 Una sola alerta ABIERTA por zona y prueba
+    Indice unico PARCIAL sobre estado: 'ABIERTA'. Mientras la alerta sigue
+    abierta, los casos nuevos actualizan sus cifras en lugar de abrir otra.
+    Sin esa regla, cada caso del mismo brote abriria una alerta y el panel
+    acabaria con veinte avisos del mismo hecho.
+
+    Al cerrarla, si el brote reaparece se puede abrir otra: el indice parcial
+    lo permite.
+
+3.5 Una alerta no se borra ni se reabre
+    Se cierra como CONFIRMADA o DESCARTADA, con motivo obligatorio. Que se
+    sepa cuantas se descartaron y por que es lo que permite afinar el umbral:
+    si casi todas se descartan, esta demasiado bajo. Borrarlas dejaria el
+    sistema sin forma de saber si avisa de mas.
+
+3.6 El nivel de riesgo se CALCULA
+    RiskLevel.evaluar() lo decide a partir de cuanto se supera el umbral y de
+    cuantos casos son criticos, para que dos alertas con las mismas cifras no
+    acaben con niveles distintos.
+
+    Un solo caso critico ya sube a MEDIO aunque los casos apenas superen el
+    umbral: un valor critico significa que hay alguien en riesgo inmediato, y
+    eso pesa mas que el recuento. Solo el nivel ALTO se registra con WARN.
+
+3.7 La deteccion corre en DOS sitios, y no es redundante
+    El consumidor evalua la zona y la prueba del caso que acaba de llegar: un
+    brote detectado doce horas despues sirve de poco. El scheduler barre todo
+    cada hora.
+
+    El barrido no sobra. Cubre dos casos que el consumidor no puede ver:
+    un brote que cruza el umbral porque la ventana AVANZA o porque se bajo el
+    umbral en configuracion, sin que llegue ningun caso nuevo que lo dispare;
+    y los casos registrados mientras la deteccion fallaba, por ejemplo con
+    Mongo momentaneamente inaccesible.
+
+3.8 Un fallo en una zona no corta el barrido
+    Cada candidato se evalua en su propio try. Un barrido que se corta en la
+    tercera zona deja sin vigilar las veinte siguientes, y nadie se enteraria.
+
+3.9 La intensidad del mapa se calcula en el SERVIDOR
+    Relativa a la zona con mas casos del mismo periodo. Si cada panel la
+    normalizara por su cuenta, dos pantallas del mismo dato mostrarian
+    colores distintos.
+
+3.10 Las zonas sin centroide salen sin coordenadas
+    Incluida la marca "SIN ZONA", que es lo que se guarda cuando el paciente
+    no tiene zona registrada. El panel las muestra en la tabla pero no en el
+    mapa, que es mejor que situarlas en un punto inventado.
+
+    El catalogo de centroides se carga una vez al arrancar. Si el archivo
+    falta, el servicio arranca igual y el mapa sale sin coordenadas: dejar sin
+    arrancar toda la analitica por un archivo de adorno geografico seria
+    desproporcionado.
+
+3.11 Los dias sin datos salen con CEROS
+    Una grafica que salta del dia 3 al dia 9 porque no hubo resultados dibuja
+    una recta entre ambos y sugiere una tendencia que no existe. Un dia sin
+    datos es un cero y hay que verlo.
+
+3.12 Una serie larga agrupa sus puntos
+    Por semana en un trimestre y por mes en un anio. Una serie anual con un
+    punto por dia son 365 puntos que en una grafica no se leen.
+
+3.13 Si antes no hubo casos, la variacion es NULA
+    Pasar de 0 a 5 casos no es "subio un 500 por ciento": es que no habia con
+    que comparar. Devolver un infinito o un numero inventado haria que el
+    panel mostrara una cifra sin sentido. El cliente debe mostrar "sin
+    comparacion".
+
+3.14 Las fotos de indicadores existen porque los informes cambian
+    Un indicador calculado sobre los registros vivos cambia si un resultado
+    se corrige la semana siguiente, y entonces el porcentaje con el que se
+    tomo una decision deja de ser reproducible. Las fotos lo conservan.
+
+    El archivado es idempotente por dia: sobrescribe la foto del mismo
+    periodo. Verificado: archivar dos veces deja 4 fotos, no 8.
+
+3.15 Los rangos en vivo tienen un tope de 366 dias
+    Un rango mayor haria que la agregacion recorriera millones de documentos
+    y dejaria el panel colgado. Se rechaza con 400 en lugar de servirlo lento.
+
+3.16 Todas las rutas exigen rol, sin excepcion publica
+    Aunque los agregados no lleven nombres, un mapa de casos por distrito es
+    informacion sanitaria de la poblacion atendida.
+
+
+--------------------------------------------------------------------------------
+4. EL ERROR DE LA SESION: "Between" ES EXCLUSIVO EN MONGODB
+--------------------------------------------------------------------------------
+
+Es el hallazgo importante de esta sesion, y afectaba a TODOS los recuentos.
+
+Sintoma: el consumidor registraba los casos correctamente, la agregacion del
+barrido contaba 6 casos en Villa El Salvador y abria la alerta, pero la
+deteccion puntual del consumidor contaba 0 y no abria nada. Sin ningun error
+en el log.
+
+Causa: en Spring Data MongoDB, el "Between" de los metodos derivados se
+traduce a $gt y $lt, es decir EXCLUSIVO en los dos extremos. En Spring Data
+JPA, el mismo nombre genera un BETWEEN de SQL, que INCLUYE los limites.
+
+Comprobado directamente contra la base, con el mismo rango:
+  exclusivo  ($gt/$lt):    0 documentos
+  inclusivo  ($gte/$lte):  6 documentos
+
+Los casos eran todos de hoy, que es justo el limite superior del rango, asi
+que quedaban fuera por completo.
+
+El alcance era mayor que la deteccion: afectaba tambien a
+countByFechaBetween, countByAnormalTrueAndFechaBetween y
+countByCriticoTrueAndFechaBetween, que son los que alimentan los informes. Es
+decir, TODOS los informes perdian el primer y el ultimo dia de cada periodo,
+y en un informe diario eso es el dato entero.
+
+Corregido reemplazando los ocho metodos derivados con Between por @Query con
+$gte y $lte explicitos, en los tres repositorios. Las @Aggregation ya los
+usaban y estaban bien.
+
+Anadido a MC8 del README, porque es exactamente el tipo de trampa que no da
+error de compilacion y da un resultado silenciosamente equivocado.
+
+
+--------------------------------------------------------------------------------
+5. UN SEGUNDO HALLAZGO: LA IDEMPOTENCIA FUNCIONABA DEMASIADO BIEN
+--------------------------------------------------------------------------------
+
+Al publicar eventos de prueba con idResultado 1 a 5, no se registraba ninguno.
+
+No era un fallo: el consumidor habia leido desde el principio del topico los
+resultados REALES de la sesion 06, que ya ocupaban los idResultado 1 a 10. La
+comprobacion de idempotencia los descarto como reenvios, que es exactamente
+lo que debia hacer.
+
+Se repitio la prueba con ids 9001 en adelante. Queda anotado: al publicar
+eventos a mano contra un topico que ya tiene historia, hay que usar
+identificadores que no colisionen con los reales.
+
+
+--------------------------------------------------------------------------------
+6. PRUEBAS EJECUTADAS CONTRA EL STACK REAL
+--------------------------------------------------------------------------------
+
+Con eureka, config-server, analytics-service, MongoDB y Kafka levantados:
+
+  [ok] Health UP con mongo; 43 centroides cargados del GeoJSON
+  [ok] Suscrito a result.registered y result.critical con el mismo grupo
+  [ok] 5 pacientes distintos con PCR alta en San Juan de Lurigancho ->
+       alerta abierta, 5/5 casos, riesgo bajo
+  [ok] 5 resultados del MISMO paciente en Comas -> NO abre alerta
+  [ok] 2 resultados NORMALES -> no cuentan como caso
+  [ok] 6 pacientes en Villa El Salvador, 2 criticos -> riesgo MEDIO
+  [ok] 5 criticos en Comas -> riesgo ALTO y log WARN "POSIBLE BROTE"
+  [ok] La alerta la abre el CONSUMIDOR, sin esperar al barrido
+  [ok] Barrido manual: abre las alertas pendientes
+  [ok] Mapa de calor: intensidades 1.00, 0.83, 0.50, 0.42, 0.08 y coordenadas
+       de los centroides
+  [ok] "SIN ZONA" sale sin coordenadas, solo en la tabla
+  [ok] Comas con 12 casos de 6 pacientes: el recuento de distintos discrimina
+  [ok] Informe mensual: 36 resultados, 34 casos, 11 criticos, 94.4% de
+       positividad, desglose por zona con porcentajes
+  [ok] Tendencia semanal: 7 puntos, 6 dias en cero y el ultimo con los datos
+  [ok] Variacion nula y direccion SUBE sin periodo anterior
+  [ok] Cerrar alerta como DESCARTADA con motivo
+  [ok] Reabrir una alerta cerrada -> TRANSICION_INVALIDA
+  [ok] Archivar indicadores dos veces -> 4 fotos, no 8
+  [ok] Resumen de alertas por nivel
+
+  Casos de error:
+    rango invertido             400 RANGO_INVALIDO
+    rango de 2 anios            400 RANGO_DEMASIADO_AMPLIO
+    alerta inexistente          404 ALERTA_NO_ENCONTRADA
+    indicador sin archivar      404 INDICADOR_NO_ENCONTRADO
+    cerrar sin motivo           400 VALIDACION_FALLIDA
+
+
+--------------------------------------------------------------------------------
+7. LIMITACIONES ANOTADAS
+--------------------------------------------------------------------------------
+
+  AnalyticsScheduler necesitaria ShedLock antes de escalar a mas de una
+  instancia. El indice unico parcial evita que se dupliquen las alertas, pero
+  las fotos de indicadores se recalcularian dos veces. Es la misma limitacion
+  que ExpirationCheckScheduler y SlotGenerationScheduler.
+
+  La regla de deteccion es un umbral fijo, no un modelo estadistico. No tiene
+  en cuenta la poblacion de cada zona ni la estacionalidad, asi que una zona
+  grande dara mas alertas que una pequena con la misma incidencia real. Es
+  deliberado: el objetivo es que una persona mire los datos, y afinar el
+  umbral con el uso es parte del procedimiento.
+
+  Los centroides son aproximados, con dos decimales, y solo cubren Lima y
+  Callao. No sirven para calculos de distancia ni de area.
+
+
+--------------------------------------------------------------------------------
+8. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] notification-service (:8088): el consumidor con mas topicos. Consume
+      patient.created, appointment.created, appointment.cancelled,
+      lab-order.created, sample.registered, result.registered,
+      result.critical, stock.low y stock.expired. Con este se cierra el
+      backend
+  [ ] Al implementarlo: spring-boot-flyway y spring-boot-kafka, el bean
+      ByteArrayJsonMessageConverter, NO declarar Acknowledgment, indicadores
+      de los DTOs como Boolean, y si toca MongoDB usar spring.mongodb.* y
+      nunca el Between de los metodos derivados
+  [ ] medical-service deberia publicar diagnosis.registered, para que
+      analytics vigile tambien por codigo CIE-10 y no solo por prueba de
+      laboratorio
+  [ ] Completar medcore-commons: DateUtil, QrCodeUtil y PdfUtil
+  [ ] Alinear el seed de medical-service para que pida codigos que existan en
+      el catalogo del laboratorio
+  [ ] Seeds de Postgres: cie10_seed.sql completo y lab_catalog_seed.sql
+  [ ] Conectar el consumo de reactivos con laboratory-service: el endpoint de
+      inventory ya existe, falta decidir si lo llama por Feign o por evento
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
