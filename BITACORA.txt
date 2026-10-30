@@ -959,3 +959,338 @@ sesion no se habia publicado un evento real contra un consumidor.
   [ ] Reservar el dominio estatico en dashboard.ngrok.com
 
 ================================================================================
+
+================================================================================
+SESION 06  -  29 de octubre de 2026
+Objetivo: laboratory-service, el servicio mas grande de la Fase 3.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LO CONSTRUIDO
+--------------------------------------------------------------------------------
+
+laboratory-service (:8085). Es el unico servicio con DOS bases de datos:
+
+  lab_db (Postgres)          lo que tiene forma fija y se consulta
+                             relacionalmente
+    test_catalog             catalogo de pruebas, 12 cargadas
+    reference_ranges         rangos de normalidad por sexo y edad
+    critical_values          limites que obligan a avisar al medico
+    samples                  el tubo, desde que llega hasta que se cierra
+    results                  resultados ya interpretados
+    pending_lab_orders       cola de ordenes en espera de muestra
+    pending_lab_order_tests  pruebas que pide cada orden
+
+  lab_results_db (MongoDB)   lo que no tiene forma fija
+    lab_results              la trama cruda que emitio el equipo
+
+Cinco migraciones (V1 a V5) y el paquete hl7/ completo:
+  OruR01Parser        mensajes ORU^R01 con HAPI
+  AstmMessageParser   ASTM E1394, escrito a mano (HAPI no lo cubre)
+  EquipmentAdapter    detecta el formato por el primer segmento
+  Hl7MessageValidator validacion previa propia
+  AckBuilder          acuses AA, AE y AR
+  Hl7ResultMapper     exporta resultados como ORU^R01
+
+65 pruebas del servicio, 117 en todo el backend.
+
+
+--------------------------------------------------------------------------------
+2. DECISIONES DE DISENO
+--------------------------------------------------------------------------------
+
+2.1 Dos bases de datos en un solo servicio
+    El resultado interpretado tiene forma fija: valor, unidad, rango,
+    interpretacion. Va en Postgres.
+
+    La trama que emite el equipo no la tiene: cada fabricante envia los
+    parametros que mide y los nombra a su manera. Guardarla en columnas
+    obligaria a una migracion por cada analizador nuevo. Va en MongoDB, con
+    la trama literal sin tocar, para poder reprocesarla si manana se descubre
+    que el parser leia mal un campo.
+
+2.2 La interfaz HL7 nunca devuelve un error HTTP
+    Un equipo que no recibe ACK reintenta, y segun el modelo acaba bloqueando
+    su cola de salida. Devolver un 422 ante una trama mala pararia el
+    laboratorio entero.
+
+    Hl7Controller responde siempre 200 con un ACK, y el codigo del fallo va
+    en el segmento MSA, que es donde el equipo lo busca:
+      AA  procesado
+      AE  no se pudo interpretar; reintentar tiene sentido
+      AR  rechazado; reintentar lo mismo no va a funcionar
+
+    El ACK se arma como texto y no con el modelo de HAPI: es un mensaje de
+    tres segmentos cuya forma no varia, y construirlo a mano evita que un
+    fallo del propio HAPI deje al equipo sin respuesta, que es justamente lo
+    que hay que evitar.
+
+2.3 La validacion estricta de HAPI esta desactivada
+    Los equipos reales incumplen el estandar en detalles menores: campos
+    opcionales vacios, fechas sin segundos, separadores de sobra. Con la
+    validacion activa HAPI rechaza el mensaje entero y se pierde un resultado
+    perfectamente legible.
+
+    La validacion propia comprueba lo que el proceso necesita de verdad: que
+    haya MSH, que el tipo sea ORU y que exista al menos una OBX con valor.
+
+2.4 El identificador de la muestra se busca en varias posiciones
+    Cada fabricante lo coloca donde le parece: OBR-3, OBR-2, OBR-15 o el
+    sub-id de la OBX en HL7; O-3 u O-4 en ASTM. Se prueban en orden antes de
+    rendirse.
+
+2.5 Los limites criticos se comprueban ANTES del rango de referencia
+    Un valor critico esta tambien fuera del rango, y lo que debe informarse
+    es lo mas grave. Al reves, un valor peligroso saldria informado solo como
+    "alto".
+
+2.6 Los limites del laboratorio mandan sobre el flag del equipo
+    El flag OBX-8 viene calculado con los rangos que el analizador tiene de
+    fabrica, que no son los del laboratorio. Pero si el equipo marca critico
+    y los limites propios no, se respeta el aviso del equipo: dejar pasar un
+    valor peligroso es peor que avisar de mas. La discrepancia queda en el
+    log para revisar los limites.
+
+2.7 /api/hl7/oru es publico, y se protege por red
+    Los analizadores no saben enviar un JWT: abren una conexion y escriben.
+    En produccion solo la VLAN del laboratorio debe alcanzar el puerto 8085,
+    y el gateway no publica esa ruta al exterior. La exportacion, que saca
+    datos clinicos del sistema, si exige rol.
+
+2.8 Un resultado validado no se modifica
+    Es un registro clinico. Corregirlo consiste en anadir otro que lo
+    rectifique, apuntando al anterior. El indice unico es PARCIAL sobre los
+    no corregidos, para que la correccion conviva con el resultado que
+    rectifica.
+
+2.9 La cola de ordenes es una proyeccion local del evento
+    Entre que el medico emite la orden y el paciente trae el tubo pasa
+    tiempo, y a veces el paciente no acude. El laboratorio NO consulta a
+    medical-service cuando el tubo aparece en el mostrador: con la copia
+    local sigue trabajando aunque ese servicio este caido, que es el punto de
+    desacoplar por Kafka.
+
+    La clave primaria es el id de la orden en medical-service, no uno propio:
+    asi recibir el mismo evento dos veces, que la garantia "al menos una vez"
+    de Kafka permite, no crea dos filas.
+
+2.10 El sexo y la edad se piden a patient-service
+    No viajan en lab-order.created porque medical-service no los guarda, y el
+    laboratorio los necesita para elegir el rango de referencia.
+
+    Si patient-service no responde, la muestra se registra igual sin ellos:
+    que el padron de pacientes este caido no debe impedir recibir un tubo de
+    sangre. Queda en el log con nivel WARN.
+
+2.11 Los indices de MongoDB los declara la infraestructura
+    infra/mongo/init/01-init-collections.js es a MongoDB lo que las
+    migraciones de Flyway son a Postgres. El servicio arranca con
+    auto-index-creation en false.
+
+2.12 El rechazo de una muestra devuelve la orden a la cola
+    Un tubo hemolizado, mal rotulado o con volumen insuficiente es un
+    desenlace normal del laboratorio. La orden vuelve a estar pendiente y el
+    indice unico PARCIAL de V2 permite registrar una segunda muestra viva. El
+    motivo llega al medico por sample.registered con eventType
+    sample.rejected.
+
+
+--------------------------------------------------------------------------------
+3. DOS CAMBIOS DE SPRING BOOT 4 QUE NO DAN ERROR DE COMPILACION
+--------------------------------------------------------------------------------
+
+Los dos se detectaron ejecutando contra el stack real. Ninguno lo habria
+encontrado una prueba unitaria.
+
+3.1 La conexion a MongoDB se movio de spring.data.mongodb a spring.mongodb
+    Sintoma: el servicio no arrancaba.
+      Command createIndexes requires authentication (error 13, Unauthorized)
+
+    La clave antigua spring.data.mongodb.uri NO da error: se ignora en
+    silencio y el driver se conecta a localhost:27017 sin credenciales. Se
+    confirmo en el log del MongoClient, que mostraba credential=null.
+
+    En los metadatos de spring-boot-mongodb 4.0.9 las claves antiguas estan
+    marcadas deprecated con level=error y su replacement es spring.mongodb.*.
+    Corregido en laboratory-service.yml y analytics-service.yml.
+
+    OJO: spring.data.mongodb.auto-index-creation NO se movio. Esa es de
+    Spring Data, no de la conexion, y sigue donde estaba.
+
+    Redis va al contrario: spring.data.redis.* es la clave ACTUAL y
+    spring.redis.* la deprecada. Comprobado, no hacia falta tocar el gateway.
+
+3.2 Jackson 3 rechaza un cuerpo que omite un campo primitivo
+    Sintoma: un POST a /api/samples sin el campo "urgente" devolvia
+      400 JSON_INVALIDO - El cuerpo de la peticion no tiene un formato valido
+
+    Jackson 2 dejaba el primitivo en false. Jackson 3, el de Spring Boot 4,
+    falla. Un formulario que no envia una casilla sin marcar es lo normal, asi
+    que obligar al cliente a mandarla seria una trampa.
+
+    Corregido declarando el campo como Boolean y anadiendo un accesor que
+    trata null como false. Afectaba a dos DTOs:
+      SampleRequest.urgente                      (laboratory-service)
+      DiagnosisRequest.principal y casoNuevo     (medical-service)
+
+
+--------------------------------------------------------------------------------
+4. CUATRO ERRORES PROPIOS QUE SOLO APARECIERON AL EJECUTAR
+--------------------------------------------------------------------------------
+
+4.1 El indice unico de Mongo hacia fallar el reenvio de un equipo
+    Sintoma: reenviar la misma trama devolvia
+      MSA|AE|...|Error interno de MedCore; reintente
+    con DuplicateKeyException por debajo.
+
+    Un analizador que no recibe el ACK a tiempo reenvia el mismo mensaje. El
+    indice era unico por idMuestra, asi que el segundo insert chocaba y el
+    equipo recibia un ACK de error por algo que ya estaba guardado.
+
+    Pero idMuestra sola tampoco es la clave correcta: un equipo puede enviar
+    dos tandas de la misma muestra, por ejemplo un hemograma y despues la
+    formula diferencial.
+
+    La clave correcta es (idMuestra, idMensaje), donde idMensaje es el control
+    id MSH-10. Un reenvio repite el control id y queda fuera; una tanda nueva
+    trae otro y entra. ASTM no tiene campo equivalente, asi que para esas
+    tramas se usa la huella de la propia trama, que cumple la misma funcion.
+
+    Ahora el reenvio reutiliza el documento existente y responde AA.
+
+4.2 Recrear una entidad con @ElementCollection duplica sus filas
+    Sintoma: rechazar una muestra devolvia 409 DATOS_DUPLICADOS.
+
+    Para devolver la orden a la cola se recreaba PendingLabOrder con la misma
+    clave primaria, confiando en que save() hiciera merge. El merge intentaba
+    insertar otra vez las filas de pending_lab_order_tests y chocaba con
+    ux_pending_test.
+
+    Corregido con un metodo de dominio reabrir() sobre la entidad gestionada.
+    El truco de recrear la entidad era fragil y no hacia falta.
+
+4.3 Un save redundante deshacia la devolucion a la cola
+    Lo detecto una prueba unitaria antes de llegar a la base: el metodo
+    guardaba la orden dos veces, y el segundo save la escribia otra vez con
+    atendida en true, que es como seguia en memoria. La orden no reaparecia
+    en la cola.
+
+4.4 Un rango de referencia se aplicaba a quien no le correspondia
+    Sintoma: una muestra de una mujer de 34 anios, registrada mientras
+    patient-service estaba caido, se interpreto contra el rango PEDIATRICO de
+    11.0 a 14.0 g/dL. El informe mostraba un rango que no era el suyo.
+
+    La regla original descartaba los rangos que exigen sexo cuando el sexo es
+    desconocido, pero no los que acotan edad cuando la edad lo es. El
+    pediatrico no exige sexo, asi que encajaba.
+
+    Regla corregida: un rango que exige un dato que no se conoce NO se aplica.
+    Cuando no queda ninguno, el valor se informa sin interpretar, y es el
+    medico quien lo lee con el criterio que corresponda. Los limites criticos
+    siguen aplicando: no dependen del sexo ni de la edad.
+
+
+--------------------------------------------------------------------------------
+5. UN DESALINEAMIENTO ENTRE SERVICIOS, DETECTADO CON DATOS REALES
+--------------------------------------------------------------------------------
+
+Al consumir la primera orden real de medical-service, el laboratorio la
+mostro con una prueba marcada "Codigo no reconocido por el laboratorio":
+
+  medical-service pedia   PCR-001
+  el catalogo tenia       INM-001  (Proteina C reactiva)
+
+Dos consecuencias y dos arreglos:
+
+5.1 El catalogo se alinea con el codigo que el sistema usa
+    El dueno del catalogo es laboratory-service (MC1), de modo que lo que
+    corresponde es que el catalogo tenga el codigo con el que el sistema pide
+    la prueba, no que cada servicio traduzca por su cuenta.
+
+    La migracion V5 lo renombra. No con UPDATE del codigo, porque es clave
+    primaria referenciada sin ON UPDATE CASCADE: inserta la nueva, reapunta
+    las filas que dependian de la anterior y borra la anterior.
+
+5.2 Una prueba fuera de catalogo no puede bloquear el cierre
+    El cierre de la muestra exige que todas las pruebas de la orden esten
+    informadas. Con un codigo que el laboratorio no tiene, la muestra queda
+    abierta PARA SIEMPRE: nadie puede informar lo que no sabe hacer.
+
+    Ahora esas pruebas no se exigen, quedan en el log con nivel WARN y el
+    tecnico ya las ve marcadas en la cola de ordenes.
+
+
+--------------------------------------------------------------------------------
+6. PRUEBAS EJECUTADAS CONTRA EL STACK REAL
+--------------------------------------------------------------------------------
+
+Con eureka, config-server, patient-service, laboratory-service, Postgres,
+MongoDB y Kafka levantados:
+
+  [ok] Las 5 migraciones aplicadas; health UP con db y mongo
+  [ok] Evento lab-order.created publicado a mano -> la orden entra en la cola
+  [ok] Orden con un codigo fuera de catalogo -> enCatalogo=false, visible
+  [ok] Muestra registrada SIN patient-service -> sin sexo ni edad, se registra
+  [ok] Muestra registrada CON patient-service -> sexo MASCULINO, edad 34
+  [ok] La urgencia de la orden manda sobre la casilla de recepcion
+  [ok] Trama HL7 enviada SIN token, como un analizador -> MSA|AA
+  [ok] 4 de 5 OBX registradas; la del parametro interno del equipo, omitida
+  [ok] Plaquetas 42 -> CRITICO_BAJO, result.critical publicado en Kafka
+  [ok] Potasio 6.9 -> CRITICO_ALTO
+  [ok] Trama cruda en Mongo con sus retornos de carro intactos
+  [ok] Reenvio identico de la trama -> MSA|AA, sin duplicar nada
+  [ok] Tanda nueva con otro control id -> MSA|AA, segundo documento
+  [ok] Exactamente 2 documentos en Mongo, no 3
+  [ok] Rango por sexo aplicado: 13.0 g/dL en varon adulto -> BAJO
+  [ok] Cierre bloqueado mientras faltaba PCR-001; permitido al informarla
+  [ok] Rechazo con motivo -> la orden 5001 reaparece en la cola con sus 2
+       pruebas intactas
+  [ok] Exportacion ORU^R01 con los flags OBX-8 correctos (HH, L, H, LL)
+  [ok] POST sin el campo urgente -> aceptado, urgente=false
+
+  Casos de error, todos con 200 y ACK:
+    trama vacia                   MSA|AE|UNKNOWN
+    no es HL7 ni ASTM             MSA|AE|UNKNOWN
+    es un ADT, no un ORU          MSA|AE|UNKNOWN
+    sin observaciones con valor   MSA|AE|UNKNOWN
+    muestra inexistente (HL7)     MSA|AR|MSG00042
+    muestra inexistente (ASTM)    MSA|AR|UNKNOWN
+
+
+--------------------------------------------------------------------------------
+7. LIMITACIONES ANOTADAS
+--------------------------------------------------------------------------------
+
+  El codigo correlativo de la muestra (MUE-20261029-0012) se calcula contando
+  las del dia. Con dos instancias, dos peticiones simultaneas propondrian el
+  mismo codigo: el indice unico lo rechazaria y una de las dos fallaria. Para
+  escalar hace falta una secuencia de Postgres. Es la misma limitacion que ya
+  tienen las ordenes de medical-service.
+
+  La huella que identifica una trama ASTM usa hashCode, que es estable dentro
+  de una version de Java pero no esta garantizado entre versiones. No busca
+  seguridad, solo distinguir una trama de otra, y una colision solo haria que
+  se reutilizara un documento crudo; los resultados no se perderian.
+
+
+--------------------------------------------------------------------------------
+8. PENDIENTE PARA LA PROXIMA SESION
+--------------------------------------------------------------------------------
+
+  [ ] inventory-service (:8086): reactivos, stock y alertas
+  [ ] analytics-service (:8087): epidemiologia sobre MongoDB
+  [ ] notification-service (:8088): el consumidor con mas topicos
+  [ ] Al implementar cada uno: anadir spring-boot-flyway y spring-boot-kafka,
+      el bean ByteArrayJsonMessageConverter, NO declarar Acknowledgment en los
+      listeners, y usar spring.mongodb.* si toca MongoDB
+  [ ] En los DTOs de request, declarar los indicadores como Boolean y no como
+      boolean (Jackson 3 rechaza el cuerpo que los omite)
+  [ ] Alinear el seed de medical-service para que pida codigos que existan en
+      el catalogo del laboratorio
+  [ ] Completar medcore-commons: evento de inventario, DateUtil, QrCodeUtil
+      y PdfUtil
+  [ ] Seeds de Postgres: cie10_seed.sql completo y lab_catalog_seed.sql
+  [ ] Frontend React, APK, y despliegue con ngrok y Vercel
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+
+================================================================================
