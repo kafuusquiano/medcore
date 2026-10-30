@@ -64,9 +64,26 @@ try {
 } catch (e) {
     print('epidemiological_records ya existia: ' + e.codeName);
 }
+
+// Unico: hace idempotente el consumo de result.registered. Kafka puede
+// entregar el mismo evento dos veces, y un caso contado doble falsea la
+// vigilancia entera.
+analytics.epidemiological_records.createIndex(
+    { idResultado: 1 },
+    { unique: true, name: 'idResultado' });
+
+// Los indices siguen a los campos que analytics recibe de verdad. Se vigila
+// por PRUEBA de laboratorio anormal y no por codigo CIE-10, porque
+// medical-service todavia no publica ningun evento de diagnostico. Cuando lo
+// haga, se anade codigoCie10 al documento y sus indices aqui.
 analytics.epidemiological_records.createIndex({ zona: 1, fecha: -1 });
-analytics.epidemiological_records.createIndex({ codigoCie10: 1, fecha: -1 });
-analytics.epidemiological_records.createIndex({ zona: 1, codigoCie10: 1, fecha: -1 });
+analytics.epidemiological_records.createIndex({ codigoPrueba: 1, fecha: -1 });
+// El indice de la deteccion de brotes: casos de una prueba, en una zona,
+// dentro de una ventana de dias. anormal va primero porque descarta de
+// entrada la mayoria de los registros.
+analytics.epidemiological_records.createIndex(
+    { anormal: 1, zona: 1, codigoPrueba: 1, fecha: -1 },
+    { name: 'deteccion_brotes' });
 
 try {
     analytics.createCollection('outbreak_alerts');
@@ -75,6 +92,14 @@ try {
 }
 analytics.outbreak_alerts.createIndex({ zona: 1, fechaDeteccion: -1 });
 analytics.outbreak_alerts.createIndex({ estado: 1, nivelRiesgo: -1 });
+// Una sola alerta ABIERTA por zona y prueba. Indice PARCIAL: al cerrarla,
+// si el brote reaparece se puede abrir otra. Sin esto, cada caso nuevo del
+// mismo brote abriria una alerta y el panel acabaria con veinte avisos del
+// mismo hecho.
+analytics.outbreak_alerts.createIndex(
+    { zona: 1, codigoPrueba: 1 },
+    { unique: true, name: 'alerta_abierta',
+      partialFilterExpression: { estado: 'ABIERTA' } });
 
 try {
     analytics.createCollection('indicator_snapshots');

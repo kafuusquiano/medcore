@@ -1,0 +1,572 @@
+{
+  "type": "FeatureCollection",
+  "name": "centroides-distritos-lima-callao",
+  "nota": "Centroides APROXIMADOS, con dos decimales, para situar cada zona en el mapa de calor. No sirven para calculos de distancia ni de area. Las zonas que no figuren aqui se devuelven sin coordenadas y el panel las muestra solo en la tabla.",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "ATE"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.92,
+          -12.025
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "BARRANCO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.02,
+          -12.145
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "BELLAVISTA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.105,
+          -12.06
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "BRENA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.05,
+          -12.06
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CALLAO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.125,
+          -12.055
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CARABAYLLO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.035,
+          -11.85
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CARMEN DE LA LEGUA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.095,
+          -12.04
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CHACLACAYO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.77,
+          -11.98
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CHORRILLOS"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.02,
+          -12.17
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "CIENEGUILLA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.81,
+          -12.115
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "COMAS"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.055,
+          -11.94
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "EL AGUSTINO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.99,
+          -12.04
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "INDEPENDENCIA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.05,
+          -11.99
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "JESUS MARIA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.045,
+          -12.075
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LA MOLINA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.94,
+          -12.08
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LA PERLA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.115,
+          -12.07
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LA PUNTA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.165,
+          -12.07
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LA VICTORIA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.015,
+          -12.07
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LIMA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.0428,
+          -12.0464
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LINCE"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.035,
+          -12.085
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LOS OLIVOS"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.07,
+          -11.97
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LURIGANCHO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.7,
+          -11.94
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "LURIN"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.875,
+          -12.275
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "MAGDALENA DEL MAR"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.07,
+          -12.09
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "MI PERU"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.125,
+          -11.855
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "MIRAFLORES"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.03,
+          -12.12
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "PACHACAMAC"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.86,
+          -12.23
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "PUEBLO LIBRE"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.065,
+          -12.075
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "PUENTE PIEDRA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.075,
+          -11.865
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "RIMAC"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.035,
+          -12.025
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN BORJA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.995,
+          -12.1
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN ISIDRO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.035,
+          -12.095
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN JUAN DE LURIGANCHO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.995,
+          -11.98
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN JUAN DE MIRAFLORES"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.97,
+          -12.155
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN LUIS"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.995,
+          -12.075
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN MARTIN DE PORRES"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.08,
+          -12.01
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SAN MIGUEL"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.09,
+          -12.077
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SANTA ANITA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.95,
+          -12.045
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SANTIAGO DE SURCO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.99,
+          -12.135
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "SURQUILLO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.005,
+          -12.11
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "VENTANILLA"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.13,
+          -11.87
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "VILLA EL SALVADOR"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.935,
+          -12.21
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "zona": "VILLA MARIA DEL TRIUNFO"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.94,
+          -12.17
+        ]
+      }
+    }
+  ]
+}

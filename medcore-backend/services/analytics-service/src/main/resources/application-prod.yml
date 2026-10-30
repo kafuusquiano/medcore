@@ -1,0 +1,16 @@
+# ============================================================
+# analytics-service - perfil prod (dentro de docker-compose).
+# No publica puerto al host: solo el gateway lo alcanza (MC4).
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://config-server:8888}
+
+logging:
+  level:
+    root: INFO
+    com.medcore.analytics: INFO
+    # Las consultas llevan zonas y documentos de pacientes.
+    org.springframework.data.mongodb.core.MongoTemplate: WARN

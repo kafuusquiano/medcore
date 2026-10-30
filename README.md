@@ -270,7 +270,7 @@ La validación estricta de HAPI está desactivada a propósito: los equipos real
 
 ### MC8 — Trampas de Spring Boot 4 que no dan error de compilación
 
-Cinco trampas que **no dan error de compilación**: se ignoran en silencio, o fallan solo en ejecución y lejos de su causa. Todas se encontraron levantando el stack real.
+Seis trampas que **no dan error de compilación**: se ignoran en silencio, o fallan solo en ejecución y lejos de su causa. Todas se encontraron levantando el stack real.
 
 **1. Autoconfiguraciones partidas en módulos.** Hay que declarar explícitamente lo que antes venía en el starter:
 
@@ -331,6 +331,21 @@ public ByteArrayJsonMessageConverter jsonMessageConverter(ObjectMapper objectMap
 ```bash
 mvn install -pl shared/medcore-commons -DskipTests
 ```
+
+**6. En Spring Data MongoDB, `Between` es EXCLUSIVO.** El mismo nombre de método derivado se comporta distinto según el módulo: en JPA genera un `BETWEEN` de SQL, que incluye los límites; en Mongo genera `$gt` y `$lt`, que los dejan fuera.
+
+Con rangos de fechas eso descarta el primer y el último día de cada ventana, sin ningún error. Se detectó en `analytics-service`: la detección de brotes contaba 0 casos donde la agregación contaba 6, porque todos eran de hoy, que es justo el límite superior. Afectaba también a todos los recuentos de los informes.
+
+```java
+// MAL en Mongo: pierde los extremos del rango
+long countByFechaBetween(LocalDate desde, LocalDate hasta);
+
+// BIEN: límites explícitos
+@Query(value = "{ fecha: { $gte: ?0, $lte: ?1 } }", count = true)
+long contarEntre(LocalDate desde, LocalDate hasta);
+```
+
+Las `@Aggregation` escritas a mano no tienen el problema, porque en ellas los operadores se escriben uno a uno.
 
 ---
 
