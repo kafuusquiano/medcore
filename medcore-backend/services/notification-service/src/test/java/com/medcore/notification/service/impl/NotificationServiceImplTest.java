@@ -266,7 +266,7 @@ class NotificationServiceImplTest {
         Instant manana = Instant.now().plus(1, ChronoUnit.DAYS);
         var creados = notificationService.programar(
                 NotificationType.CITA_RECORDATORIO, "evt-8:recordatorio",
-                "paciente@correo.local", 3L, null, Map.of(), manana);
+                "paciente@correo.local", 3L, null, Map.of(), "cita:501", manana);
 
         assertThat(creados).hasSize(1);
         assertThat(creados.get(0).getFechaProgramada()).isEqualTo(manana);
@@ -308,6 +308,68 @@ class NotificationServiceImplTest {
                 3L, null, Map.of());
 
         assertThat(creados).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("Cancelar retira los avisos pendientes de un hecho")
+    void cancelarRetiraLosPendientes() {
+        Notification recordatorio = aviso(NotificationChannel.EMAIL);
+        when(notificationRepository.cancelablesDe("cita:501"))
+                .thenReturn(List.of(recordatorio));
+
+        // Sin esto, el paciente recibe el dia antes el recordatorio de una
+        // cita que ya no existe.
+        int cancelados = notificationService.cancelarPendientesDe(
+                "cita:501", "La cita se anulo antes de que saliera el aviso.");
+
+        assertThat(cancelados).isEqualTo(1);
+        // OMITIDA y no borrado: que el recordatorio no saliera por la
+        // anulacion es informacion.
+        assertThat(recordatorio.getEstado()).isEqualTo(NotificationStatus.OMITIDA);
+        assertThat(recordatorio.getMotivoFallo()).contains("se anulo");
+    }
+
+    @Test
+    @DisplayName("Cancelar no toca un aviso que ya salio")
+    void cancelarNoTocaUnAvisoQueYaSalio() {
+        Notification yaEnviado = aviso(NotificationChannel.EMAIL);
+        yaEnviado.marcarEnviada();
+        // La consulta solo devuelve los cancelables, pero si uno sale entre la
+        // consulta y el guardado, la entidad rechaza la transicion y el
+        // servicio lo deja pasar en lugar de romper.
+        when(notificationRepository.cancelablesDe("cita:502"))
+                .thenReturn(List.of(yaEnviado));
+
+        int cancelados = notificationService.cancelarPendientesDe("cita:502", "anulada");
+
+        assertThat(cancelados).isZero();
+        assertThat(yaEnviado.getEstado()).isEqualTo(NotificationStatus.ENVIADA);
+    }
+
+    @Test
+    @DisplayName("Cancelar sin referencia no hace nada")
+    void cancelarSinReferenciaNoHaceNada() {
+        assertThat(notificationService.cancelarPendientesDe(null, "x")).isZero();
+        assertThat(notificationService.cancelarPendientesDe("  ", "x")).isZero();
+        verify(notificationRepository, never()).cancelablesDe(anyString());
+    }
+
+    @Test
+    @DisplayName("El aviso guarda la referencia del hecho")
+    void elAvisoGuardaLaReferencia() {
+        when(templateRepository.findById(NotificationType.CITA_RESERVADA))
+                .thenReturn(Optional.of(plantilla(NotificationType.CITA_RESERVADA,
+                        "Cita", "Mensaje", null, null)));
+
+        var creados = notificationService.crearPara(
+                NotificationType.CITA_RESERVADA, "evt-ref", "paciente@correo.local",
+                3L, null, Map.of(), "cita:501");
+
+        // Es lo que une la confirmacion, el recordatorio y la cancelacion, que
+        // llegan en eventos distintos con identificadores distintos.
+        assertThat(creados).isNotEmpty();
+        assertThat(creados).allSatisfy(aviso ->
+                assertThat(aviso.getReferencia()).isEqualTo("cita:501"));
     }
 
     @Test
@@ -427,7 +489,7 @@ class NotificationServiceImplTest {
         Notification aviso = new Notification(
                 NotificationType.CITA_RESERVADA, canal, "evt-x",
                 canal == NotificationChannel.IN_APP ? "paciente:3" : "paciente@correo.local",
-                3L, null, "Asunto", "Mensaje", "/ruta", null, Instant.now());
+                3L, null, "Asunto", "Mensaje", "/ruta", null, null, Instant.now());
         ReflectionTestUtils.setField(aviso, "id", 1L);
         return aviso;
     }

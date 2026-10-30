@@ -60,16 +60,61 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     @Transactional
     public List<Notification> crear(NotificationType tipo, String eventId, String destinatario,
-                                    Long idPaciente, Long idUsuario, Map<String, String> datos) {
-        return guardar(tipo, eventId, destinatario, idPaciente, idUsuario, datos, Instant.now());
+                                    Long idPaciente, Long idUsuario,
+                                    Map<String, String> datos) {
+        return guardar(tipo, eventId, destinatario, idPaciente, idUsuario, datos,
+                null, Instant.now());
+    }
+
+    @Override
+    @Transactional
+    public List<Notification> crearPara(NotificationType tipo, String eventId,
+                                        String destinatario, Long idPaciente,
+                                        Long idUsuario, Map<String, String> datos,
+                                        String referencia) {
+        return guardar(tipo, eventId, destinatario, idPaciente, idUsuario, datos,
+                referencia, Instant.now());
     }
 
     @Override
     @Transactional
     public List<Notification> programar(NotificationType tipo, String eventId,
-                                        String destinatario, Long idPaciente, Long idUsuario,
-                                        Map<String, String> datos, Instant cuando) {
-        return guardar(tipo, eventId, destinatario, idPaciente, idUsuario, datos, cuando);
+                                        String destinatario, Long idPaciente,
+                                        Long idUsuario, Map<String, String> datos,
+                                        String referencia, Instant cuando) {
+        return guardar(tipo, eventId, destinatario, idPaciente, idUsuario, datos,
+                referencia, cuando);
+    }
+
+    @Override
+    @Transactional
+    public int cancelarPendientesDe(String referencia, String motivo) {
+        if (referencia == null || referencia.isBlank()) {
+            return 0;
+        }
+
+        List<Notification> cancelables = notificationRepository.cancelablesDe(referencia);
+        int cancelados = 0;
+
+        for (Notification aviso : cancelables) {
+            try {
+                aviso.cancelar(motivo);
+                notificationRepository.save(aviso);
+                cancelados++;
+            } catch (IllegalStateException e) {
+                // Salio entre la consulta y aqui. No es un error: ya no
+                // hay nada que cancelar.
+                log.debug("El aviso {} ya no se puede cancelar: {}",
+                        aviso.getId(), e.getMessage());
+            }
+        }
+
+        if (cancelados > 0) {
+            log.info("Cancelados {} aviso(s) pendiente(s) de {}: {}",
+                    cancelados, referencia, motivo);
+        }
+
+        return cancelados;
     }
 
     @Override
@@ -180,7 +225,8 @@ public class NotificationServiceImpl implements NotificationService {
      */
     private List<Notification> guardar(NotificationType tipo, String eventId,
                                        String destinatario, Long idPaciente, Long idUsuario,
-                                       Map<String, String> datos, Instant cuando) {
+                                       Map<String, String> datos, String referencia,
+                                       Instant cuando) {
         NotificationTemplate plantilla = templateRepository.findById(tipo)
                 .filter(NotificationTemplate::isActiva)
                 .orElseThrow(() -> NotificationException.plantillaAusente(tipo.name()));
@@ -213,7 +259,7 @@ public class NotificationServiceImpl implements NotificationService {
 
             Notification aviso = new Notification(
                     tipo, canal, eventId, destino, pacienteDelAviso, idUsuario,
-                    asunto, mensaje, enlace, datosJson, cuando);
+                    asunto, mensaje, enlace, datosJson, referencia, cuando);
 
             try {
                 creados.add(notificationRepository.save(aviso));

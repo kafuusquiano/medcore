@@ -58,13 +58,14 @@ public class AppointmentEventConsumer {
 
             Map<String, String> datos = datosDe(evento);
 
-            notificationService.crear(
+            notificationService.crearPara(
                     NotificationType.CITA_RESERVADA,
                     evento.eventId(),
                     evento.correoPaciente(),
                     evento.idPaciente(),
                     null,
-                    datos);
+                    datos,
+                    referenciaDe(evento));
 
             programarRecordatorio(evento, datos);
 
@@ -86,6 +87,17 @@ public class AppointmentEventConsumer {
             datos.put("motivo", evento.motivoCancelacion() == null
                     ? "no indicado"
                     : evento.motivoCancelacion());
+
+            // Antes de avisar de la anulacion, se retira el recordatorio
+            // que quedaba programado: sin esto el paciente recibe el dia
+            // antes el recordatorio de una cita que ya no existe.
+            int retirados = notificationService.cancelarPendientesDe(
+                    referenciaDe(evento),
+                    "La cita se anulo antes de que saliera el aviso.");
+            if (retirados > 0) {
+                log.info("Retirados {} aviso(s) pendiente(s) de la cita {} [{}]",
+                        retirados, evento.idCita(), evento.requestId());
+            }
 
             // Se avisa siempre, aunque la cancele el propio paciente: la
             // confirmacion es lo que le permite comprobar que la cancelacion
@@ -145,7 +157,18 @@ public class AppointmentEventConsumer {
                 evento.idPaciente(),
                 null,
                 datos,
+                referenciaDe(evento),
                 cuando);
+    }
+
+    /**
+     * Referencia del hecho: la cita.
+     *
+     * <p>Es lo que une la confirmacion, el recordatorio y la cancelacion,
+     * que llegan en eventos distintos con identificadores distintos.
+     */
+    private String referenciaDe(AppointmentEvent evento) {
+        return "cita:" + evento.idCita();
     }
 
     private Map<String, String> datosDe(AppointmentEvent evento) {

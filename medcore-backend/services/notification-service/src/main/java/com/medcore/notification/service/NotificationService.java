@@ -39,6 +39,16 @@ public interface NotificationService {
                              Long idPaciente, Long idUsuario, Map<String, String> datos);
 
     /**
+     * Igual que {@link #crear}, anotando a que hecho se refiere el aviso.
+     *
+     * <p>La referencia, como {@code "cita:42"}, permite cancelarlo despues
+     * si ese hecho desaparece.
+     */
+    List<Notification> crearPara(NotificationType tipo, String eventId,
+                                 String destinatario, Long idPaciente, Long idUsuario,
+                                 Map<String, String> datos, String referencia);
+
+    /**
      * Igual que {@link #crear}, pero programando el envio para mas tarde.
      *
      * <p>Lo usa el recordatorio de cita, que se crea al reservar y sale el dia
@@ -46,7 +56,22 @@ public interface NotificationService {
      */
     List<Notification> programar(NotificationType tipo, String eventId, String destinatario,
                                  Long idPaciente, Long idUsuario, Map<String, String> datos,
-                                 Instant cuando);
+                                 String referencia, Instant cuando);
+
+    /**
+     * Cancela los avisos pendientes de un hecho que ya no ocurrira.
+     *
+     * <p>El caso es el recordatorio de una cita que se anula: sin esto, el
+     * paciente recibe el dia antes el recordatorio de una cita que ya no
+     * existe.
+     *
+     * <p>Los avisos ya enviados no se tocan, porque no se pueden retirar, y
+     * los cancelados se marcan OMITIDA en lugar de borrarse: que el
+     * recordatorio no saliera por la anulacion es informacion.
+     *
+     * @return cuantos se cancelaron
+     */
+    int cancelarPendientesDe(String referencia, String motivo);
 
     NotificationResponse obtenerPorId(Long id);
 

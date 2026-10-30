@@ -345,7 +345,7 @@ class NotificationDispatcherTest {
         Notification aviso = new Notification(
                 tipo, canal, "evt-" + id, "paciente@correo.local",
                 3L, null, "Asunto de prueba", "Mensaje de prueba",
-                "/ruta", null, Instant.now());
+                "/ruta", null, null, Instant.now());
         ReflectionTestUtils.setField(aviso, "id", id);
         return aviso;
     }

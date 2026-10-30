@@ -106,6 +106,18 @@ public class Notification {
     @Column(name = "datos", columnDefinition = "text")
     private String datos;
 
+    /**
+     * Hecho al que se refiere el aviso, como {@code "cita:42"}.
+     *
+     * <p>Permite cancelar un aviso programado cuando ese hecho
+     * desaparece: el recordatorio de una cita que se anula. No sirve el
+     * eventId para eso, porque la confirmacion y la cancelacion son
+     * eventos distintos y desde una no se puede derivar el identificador
+     * del aviso de la otra.
+     */
+    @Column(name = "referencia", length = 60)
+    private String referencia;
+
     @Column(name = "intentos", nullable = false)
     private int intentos = 0;
 
@@ -147,7 +159,7 @@ public class Notification {
     public Notification(NotificationType tipo, NotificationChannel canal, String eventId,
                         String destinatario, Long idPaciente, Long idUsuario,
                         String asunto, String mensaje, String enlace, String datos,
-                        Instant fechaProgramada) {
+                        String referencia, Instant fechaProgramada) {
         this.tipo = tipo;
         this.canal = canal;
         this.eventId = eventId;
@@ -158,6 +170,7 @@ public class Notification {
         this.mensaje = mensaje;
         this.enlace = enlace;
         this.datos = datos;
+        this.referencia = referencia;
         this.fechaProgramada = fechaProgramada == null ? Instant.now() : fechaProgramada;
         this.estado = NotificationStatus.PENDIENTE;
     }
@@ -210,6 +223,17 @@ public class Notification {
         exigirTransicion(NotificationStatus.OMITIDA);
         this.estado = NotificationStatus.OMITIDA;
         this.motivoFallo = recortar(motivo);
+    }
+
+    /**
+     * Cancela un aviso que ya no tiene sentido enviar.
+     *
+     * <p>Se marca OMITIDA y no se borra: que el paciente no recibiera el
+     * recordatorio porque la cita se anulo es informacion, y borrarlo
+     * dejaria el historial diciendo que nunca existio.
+     */
+    public void cancelar(String motivo) {
+        marcarOmitida(motivo);
     }
 
     /** El usuario abrio el aviso. Solo tiene sentido en los in-app. */
@@ -299,6 +323,10 @@ public class Notification {
 
     public String getDatos() {
         return datos;
+    }
+
+    public String getReferencia() {
+        return referencia;
     }
 
     public int getIntentos() {

@@ -51,6 +51,21 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
                                    @Param("maxIntentos") int maxIntentos,
                                    Pageable pageable);
 
+    /**
+     * Avisos de un hecho que todavia pueden cancelarse.
+     *
+     * <p>Solo los que no han salido: uno ya enviado no se puede retirar,
+     * asi que buscarlo no serviria de nada. Es la consulta que usa la
+     * cancelacion de una cita para retirar su recordatorio.
+     */
+    @Query("""
+           SELECT n FROM Notification n
+           WHERE n.referencia = :referencia
+             AND n.estado IN (com.medcore.notification.domain.enums.NotificationStatus.PENDIENTE,
+                              com.medcore.notification.domain.enums.NotificationStatus.FALLIDA)
+           """)
+    List<Notification> cancelablesDe(@Param("referencia") String referencia);
+
     /** Bandeja de un paciente: sus avisos in-app, del mas reciente al mas antiguo. */
     @Query("""
            SELECT n FROM Notification n

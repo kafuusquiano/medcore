@@ -43,9 +43,15 @@ Arquitectura de microservicios con Spring Cloud, frontend web en React y aplicac
 | `laboratory-service` | 8085 | Muestras, resultados, HL7 | `lab_db` + MongoDB |
 | `inventory-service` | 8086 | Reactivos, stock, alertas | `inventory_db` |
 | `analytics-service` | 8087 | Epidemiología, brotes | MongoDB |
-| `notification-service` | 8088 | Email, push, in-app | `notification_db` |
+| `notification-service` | 8088 | Correo y avisos in-app | `notification_db` |
+
+Los once están implementados, con 216 pruebas. `laboratory-service` es el único que usa dos bases a la vez, y `analytics-service` el único sin Postgres: sus datos son series y agregados, no entidades relacionadas.
+
+En `notification-service`, los canales de push y SMS están declarados pero **no implementados**: Firebase necesita un proyecto con credenciales y el SMS una pasarela con contrato. Un envío por esos canales se marca como omitido con su motivo, en lugar de simular que salió.
 
 ### Tópicos Kafka
+
+Nueve tópicos, todos con productor y consumidores reales a los dos lados:
 
 | Tópico | Productor | Consumidores |
 |---|---|---|
@@ -53,11 +59,19 @@ Arquitectura de microservicios con Spring Cloud, frontend web en React y aplicac
 | `appointment.created` | appointment-service | notification-service |
 | `appointment.cancelled` | appointment-service | notification-service, medical-service |
 | `lab-order.created` | medical-service | laboratory-service, notification-service |
-| `sample.registered` | laboratory-service | log interno |
+| `sample.registered` | laboratory-service | notification-service |
 | `result.registered` | laboratory-service | analytics-service, notification-service |
-| `result.critical` | laboratory-service | notification-service, analytics-service |
+| `result.critical` | laboratory-service | analytics-service, notification-service |
 | `stock.low` | inventory-service | notification-service |
 | `stock.expired` | inventory-service | notification-service |
+
+`notification-service` consume los nueve y no publica ninguno: es el extremo de todas las cadenas. `sample.registered` lleva dos desenlaces distinguidos por `eventType` — la muestra aceptada avisa al paciente y la rechazada al médico.
+
+Reglas que valen para todos los consumidores del sistema:
+
+- **Idempotencia obligatoria.** Kafka entrega al menos una vez, así que cada consumidor necesita una clave natural con índice único que descarte el reenvío: `idResultado` en analytics, `(event_id, tipo, canal)` en notification, el identificador de la orden en la cola del laboratorio. Sin eso, un reenvío cuenta dos veces un caso epidemiológico o manda dos veces el mismo correo.
+- **El consumidor atrapa toda `RuntimeException`.** Un mensaje problemático no debe bloquear la partición y dejar sin procesar los siguientes, que pueden ser un valor crítico.
+- **Los eventos se publican después del commit**, con `TransactionSynchronization`, nunca dentro de la transacción: anunciar algo que un rollback posterior deja sin existir es peor que no anunciarlo.
 
 ---
 
@@ -361,16 +375,25 @@ Las `@Aggregation` escritas a mano no tienen el problema, porque en ellas los op
 
 Requisitos: JDK 21, Maven 3.9, Node 20+, Docker Desktop con backend WSL2.
 
+Antes del primer arranque, copia `.env.example` a `.env` y rellena `JWT_SECRET` con una clave de al menos 32 bytes (jjwt rechaza menos para HS256) y `ADMIN_INITIAL_PASSWORD` con la contraseña del administrador que crea `AdminBootstrap`. El `.env` está en `.gitignore` y no se sube.
+
 ```bash
-# Solo infraestructura: Postgres, MongoDB, Redis, Kafka
+# Generar una clave de firma de 64 bytes
+openssl rand -base64 64
+```
+
+```bash
+# Solo infraestructura: Postgres, MongoDB, Redis, Kafka, Mailpit
 docker compose -f docker-compose.infra.yml up -d
 
-# Stack completo
-docker compose up -d
+# Stack completo: la infraestructura más los 11 servicios
+docker compose up -d --build
 
 # Un servicio suelto, desde medcore-backend/
 ./mvnw -pl services/patient-service -am spring-boot:run
 ```
+
+El orden de arranque lo impone `depends_on` con `condition: service_healthy` (MC2): primero las bases y Kafka, luego Eureka, después el Config Server y por último los microservicios. Un `up -d` tarda unos minutos la primera vez, porque cada servicio espera a que el anterior esté sano.
 
 Puntos de entrada locales:
 
@@ -379,8 +402,13 @@ Puntos de entrada locales:
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | Eureka | http://localhost:8761 |
 | Kafka UI | http://localhost:8090 |
-| Mailpit | http://localhost:8025 |
+| Mailpit (correos de desarrollo) | http://localhost:8025 |
+| Interfaz HL7 de los equipos | http://localhost:8085/api/hl7/oru |
 | Frontend | http://localhost:3000 |
+
+Al host se publican solo cuatro puertos: el 8080 del gateway, el 8085 de la interfaz HL7, y el 8090 y 8025 de las dos utilidades de desarrollo. Los demás servicios viven en la red interna de Compose y solo el gateway los alcanza (MC4).
+
+El 8085 es la excepción deliberada: los analizadores de laboratorio escriben la trama directamente al servicio y no saben enviar un JWT, así que esa ruta se protege por red. En producción, solo la VLAN del laboratorio debe llegar a ese puerto.
 
 ---
 
