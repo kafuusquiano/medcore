@@ -1,0 +1,21 @@
+# ============================================================
+# laboratory-service — perfil prod (dentro de docker-compose).
+# No publica puerto al host: solo el gateway lo alcanza (MC4).
+#
+# La excepcion es la interfaz HL7: los equipos del laboratorio escriben
+# directamente al puerto del servicio, no al gateway, y se protege por red
+# (solo la VLAN del laboratorio llega hasta aqui).
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://config-server:8888}
+
+logging:
+  level:
+    root: INFO
+    com.medcore.laboratory: INFO
+    org.hibernate.SQL: WARN
+    # Las consultas a Mongo llevan datos del paciente en la trama cruda.
+    org.springframework.data.mongodb.core.MongoTemplate: WARN

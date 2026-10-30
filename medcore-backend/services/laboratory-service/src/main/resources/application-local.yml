@@ -1,0 +1,17 @@
+# ============================================================
+# laboratory-service — perfil local (ejecucion fuera de Docker).
+# ============================================================
+
+spring:
+  cloud:
+    config:
+      uri: ${SPRING_CLOUD_CONFIG_URI:http://localhost:8888}
+
+logging:
+  level:
+    com.medcore.laboratory: DEBUG
+    org.springframework.security: INFO
+    org.hibernate.SQL: DEBUG
+    # Las tramas de los equipos se registran al depurar la integracion, pero
+    # contienen datos del paciente: en prod este nivel sube a WARN.
+    org.springframework.data.mongodb.core.MongoTemplate: DEBUG

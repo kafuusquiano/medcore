@@ -21,11 +21,28 @@ public record DiagnosisRequest(
                 message = "El codigo CIE-10 no tiene un formato valido, por ejemplo A09 o J45.0")
         String codigoCie10,
 
-        boolean principal,
+        Boolean principal,
 
-        boolean casoNuevo,
+        Boolean casoNuevo,
 
         @Size(max = 500, message = "Las observaciones no pueden superar los 500 caracteres")
         String observaciones
 ) {
+
+    /**
+     * Un indicador ausente en el JSON vale lo mismo que false.
+     *
+     * <p>El campo se declara como Boolean y no como boolean porque Jackson 3,
+     * el de Spring Boot 4, rechaza con 400 un cuerpo que omite un primitivo
+     * en lugar de dejarlo en false, que era el comportamiento de Jackson 2.
+     * Un formulario que no envia la casilla sin marcar es lo normal, y
+     * obligar al cliente a mandarla explicitamente seria una trampa.
+     */
+    public boolean esPrincipal() {
+        return Boolean.TRUE.equals(principal);
+    }
+
+    public boolean esCasoNuevo() {
+        return Boolean.TRUE.equals(casoNuevo);
+    }
 }

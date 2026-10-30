@@ -218,12 +218,25 @@ laboratory-service/src/main/java/com/medcore/laboratory/hl7/
 ├── parser/OruR01Parser.java
 ├── parser/AstmMessageParser.java
 ├── parser/Hl7MessageValidator.java
+├── parser/Hl7ParsedResult.java     # formato normalizado, comun a HL7 y ASTM
 ├── builder/AckBuilder.java
 ├── mapper/Hl7ResultMapper.java
 └── adapter/EquipmentAdapter.java
 ```
 
-Endpoint de entrada: `POST /api/lab/hl7`. Si el parseo falla, se registra el error y se responde con un ACK de error (código `AE` o `AR` en el segmento `MSA`), generado por `AckBuilder`.
+Endpoint de entrada: `POST /api/hl7/oru`, que consume `text/plain` y responde `text/plain`.
+
+**Responde siempre 200 con un ACK, nunca un error HTTP.** Un equipo que no recibe ACK reintenta y acaba bloqueando su cola de salida, así que devolver un 422 ante una trama mala pararía el laboratorio. El código del fallo va en el segmento `MSA`, que es donde el equipo lo busca:
+
+| Código | Significado | Cuándo |
+|---|---|---|
+| `AA` | Application Accept | se procesó |
+| `AE` | Application Error | no se pudo interpretar, o falló MedCore; reintentar tiene sentido |
+| `AR` | Application Reject | la muestra no existe o ya se cerró; reintentar lo mismo no funcionará |
+
+Esa ruta es pública en `SecurityConfig`: los analizadores no saben enviar un JWT. **Se protege por red, no por token:** en producción solo la VLAN del laboratorio debe alcanzar el puerto 8085, y el gateway no publica `/api/hl7/**` al exterior. La exportación (`GET /api/hl7/oru/muestra/{codigo}`) sí exige rol, porque saca datos clínicos del sistema.
+
+La validación estricta de HAPI está desactivada a propósito: los equipos reales incumplen el estándar en detalles menores (campos opcionales vacíos, fechas sin segundos) y con ella activa se perdería un resultado perfectamente legible. `Hl7MessageValidator` comprueba lo que el proceso necesita de verdad.
 
 ### MC7 — Plantilla de cada microservicio
 
@@ -253,6 +266,64 @@ Endpoint de entrada: `POST /api/lab/hl7`. Si el parseo falla, se registra el err
     │       ├── application-prod.yml
     │       └── db/migration/     # Flyway
     └── test/
+```
+
+### MC8 — Trampas de Spring Boot 4 que no dan error de compilación
+
+Cuatro cambios de Spring Boot 4 y sus módulos que **se ignoran en silencio** o fallan solo en ejecución. Todos se encontraron levantando el stack real.
+
+**1. Autoconfiguraciones partidas en módulos.** Hay que declarar explícitamente lo que antes venía en el starter:
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-flyway</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-kafka</artifactId>
+</dependency>
+```
+
+Sin la primera, Hibernate falla con `Schema validation: missing table`. Sin la segunda, `A component required a bean named 'kafkaListenerContainerFactory'`.
+
+**2. La conexión a MongoDB se movió a `spring.mongodb.*`.** La clave antigua no da error: se ignora y el driver se conecta a `localhost:27017` **sin credenciales**.
+
+```yaml
+spring:
+  mongodb:                      # ← la conexión va aquí
+    uri: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@${MONGO_HOST:localhost}:27017/lab_results_db?authSource=admin
+  data:
+    mongodb:
+      auto-index-creation: false   # ← esta sí sigue en spring.data: es de Spring Data
+```
+
+Redis va al contrario: `spring.data.redis.*` es la clave **actual** y `spring.redis.*` la deprecada.
+
+**3. Jackson 3 rechaza un cuerpo que omita un campo primitivo.** Jackson 2 lo dejaba en `false`; Jackson 3 responde 400. Un formulario que no envía una casilla sin marcar es lo normal, así que en los DTOs de request los indicadores se declaran como envoltorio:
+
+```java
+public record SampleRequest(Long idOrden, String tipoMuestra, Boolean urgente) {
+
+    /** Un indicador ausente en el JSON vale lo mismo que false. */
+    public boolean esUrgente() {
+        return Boolean.TRUE.equals(urgente);
+    }
+}
+```
+
+Jackson 3 también sacó `WRITE_DATES_AS_TIMESTAMPS` de `SerializationFeature`: configurarla rompe el arranque, y no hace falta porque su formato por omisión ya es ISO-8601.
+
+**4. Los consumidores de Kafka.** Dos reglas que valen para todos:
+
+- **No declarar un parámetro `Acknowledgment`.** La configuración usa `ack-mode: record`, y ese parámetro solo se inyecta con `ack-mode: MANUAL`. Declararlo lanza `No Acknowledgment available as an argument`.
+- **Registrar el bean `ByteArrayJsonMessageConverter`** en el `KafkaConfig` de cada servicio. Con `JsonDeserializer` el consumidor exige la cabecera `__TypeId__` y falla con `No type information in headers`; el converter deduce el tipo de la firma del `@KafkaListener`, de modo que acepta eventos de cualquier productor, incluido un reenvío manual.
+
+```java
+@Bean
+public ByteArrayJsonMessageConverter jsonMessageConverter(ObjectMapper objectMapper) {
+    return new ByteArrayJsonMessageConverter(objectMapper);
+}
 ```
 
 ---

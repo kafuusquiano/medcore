@@ -98,7 +98,7 @@ public class AttentionServiceImpl implements AttentionService {
             throw MedicalException.diagnosticoDuplicado(request.codigoCie10());
         }
 
-        if (request.principal()) {
+        if (request.esPrincipal()) {
             boolean yaHayPrincipal = atencion.getDiagnosticos().stream()
                     .anyMatch(Diagnosis::isPrincipal);
             if (yaHayPrincipal) {
@@ -107,8 +107,8 @@ public class AttentionServiceImpl implements AttentionService {
         }
 
         Diagnosis diagnostico = new Diagnosis(
-                codigo.getCodigo(), codigo.getDescripcion(), request.principal(),
-                request.casoNuevo(), codigo.isNotificable(), request.observaciones());
+                codigo.getCodigo(), codigo.getDescripcion(), request.esPrincipal(),
+                request.esCasoNuevo(), codigo.isNotificable(), request.observaciones());
 
         atencion.agregarDiagnostico(diagnostico);
 
