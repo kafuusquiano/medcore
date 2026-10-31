@@ -52,6 +52,9 @@ class MovementServiceImplTest {
     private static final Long ID_LOTE = 7L;
 
     @Mock
+    private com.medcore.inventory.repository.ReagentRepository reagentRepository;
+
+    @Mock
     private StockRepository stockRepository;
 
     @Mock
@@ -65,7 +68,8 @@ class MovementServiceImplTest {
     @BeforeEach
     void prepararServicio() {
         movementService = new MovementServiceImpl(
-                stockRepository, movementRepository, eventProducer, new StockMapper());
+                reagentRepository, stockRepository, movementRepository,
+                eventProducer, new StockMapper());
 
         lenient().when(movementRepository.save(any(MovementLog.class)))
                 .thenAnswer(invocacion -> {

@@ -1,5 +1,6 @@
 # inventory-service (:8086) — reactivos, stock y alertas.
-# Publica stock.low y stock.expired.
+# Publica stock.low y stock.expired, y consume result.registered para
+# descontar solo los reactivos que gasta cada prueba realizada.
 
 server:
   port: ${SERVER_PORT:8086}
@@ -17,6 +18,11 @@ spring:
       ddl-auto: validate
   flyway:
     locations: classpath:db/migration
+  kafka:
+    consumer:
+      # Grupo propio: analytics y notification consumen el mismo topico y
+      # cada uno tiene que recibir todos los mensajes.
+      group-id: inventory-service
 
 inventory:
   # Dias de antelacion con que se avisa de un reactivo por vencer.

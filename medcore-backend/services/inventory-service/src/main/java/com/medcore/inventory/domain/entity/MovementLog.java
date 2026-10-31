@@ -93,11 +93,33 @@ public class MovementLog {
     @Column(name = "codigo_muestra", length = 25)
     private String codigoMuestra;
 
+    /**
+     * Resultado de laboratorio que provoco el descuento automatico.
+     *
+     * <p>Es lo que hace idempotente el consumo: Kafka entrega al menos una
+     * vez, y sin esto un reenvio descontaria el reactivo dos veces y el stock
+     * del sistema quedaria por debajo del real. El almacen pediria reposicion
+     * de algo que tiene.
+     *
+     * <p>Nulo en los movimientos registrados a mano: uno repetido a mano es
+     * decision de quien lo registra, y el indice unico es parcial por eso.
+     */
+    @Column(name = "id_resultado")
+    private Long idResultado;
+
     @Column(name = "fecha_movimiento", nullable = false, updatable = false)
     private Instant fechaMovimiento;
 
     protected MovementLog() {
         // Requerido por JPA.
+    }
+
+    /** Movimiento automatico, provocado por un resultado de laboratorio. */
+    public MovementLog(Stock stock, MovementType tipo, int delta, int cantidadAnterior,
+                       String motivo, String registradoPor, String codigoMuestra,
+                       Long idResultado) {
+        this(stock, tipo, delta, cantidadAnterior, motivo, registradoPor, codigoMuestra);
+        this.idResultado = idResultado;
     }
 
     public MovementLog(Stock stock, MovementType tipo, int delta, int cantidadAnterior,
@@ -170,6 +192,10 @@ public class MovementLog {
 
     public String getCodigoMuestra() {
         return codigoMuestra;
+    }
+
+    public Long getIdResultado() {
+        return idResultado;
     }
 
     public Instant getFechaMovimiento() {

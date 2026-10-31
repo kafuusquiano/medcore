@@ -43,6 +43,17 @@ public interface MovementService {
     List<MovementResponse> consumir(Long idReactivo, int cantidad, String codigoMuestra,
                                     String usuario, String requestId);
 
+    /**
+     * Comprueba si un reactivo quedo bajo minimo y, si lo esta, lo anuncia.
+     *
+     * <p>Lo llama tambien el consumo automatico. Esta en la interfaz porque un
+     * descuento que no avisa de la reposicion no sirve de nada: el sentido de
+     * llevar el stock al dia es que alguien se entere a tiempo.
+     *
+     * @return true si quedo bajo minimo y se publico el aviso
+     */
+    boolean revisarMinimo(Long idReactivo, String requestId);
+
     Page<MovementResponse> historialDeLote(Long idStock, Pageable pageable);
 
     Page<MovementResponse> historialDeReactivo(String codigoReactivo, Pageable pageable);

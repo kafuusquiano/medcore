@@ -10,6 +10,7 @@ import com.medcore.inventory.event.producer.InventoryEventProducer;
 import com.medcore.inventory.exception.InventoryException;
 import com.medcore.inventory.mapper.StockMapper;
 import com.medcore.inventory.repository.MovementLogRepository;
+import com.medcore.inventory.repository.ReagentRepository;
 import com.medcore.inventory.repository.StockRepository;
 import com.medcore.inventory.service.MovementService;
 import org.slf4j.Logger;
@@ -32,15 +33,18 @@ public class MovementServiceImpl implements MovementService {
 
     private static final Logger log = LoggerFactory.getLogger(MovementServiceImpl.class);
 
+    private final ReagentRepository reagentRepository;
     private final StockRepository stockRepository;
     private final MovementLogRepository movementRepository;
     private final InventoryEventProducer eventProducer;
     private final StockMapper mapper;
 
-    public MovementServiceImpl(StockRepository stockRepository,
+    public MovementServiceImpl(ReagentRepository reagentRepository,
+                               StockRepository stockRepository,
                                MovementLogRepository movementRepository,
                                InventoryEventProducer eventProducer,
                                StockMapper mapper) {
+        this.reagentRepository = reagentRepository;
         this.stockRepository = stockRepository;
         this.movementRepository = movementRepository;
         this.eventProducer = eventProducer;
@@ -271,6 +275,22 @@ public class MovementServiceImpl implements MovementService {
      * cantidad del lote: lo que importa es cuanto queda en TOTAL, porque puede
      * haber otros lotes del mismo reactivo.
      */
+    @Override
+    @Transactional
+    public boolean revisarMinimo(Long idReactivo, String requestId) {
+        Reagent reactivo = reagentRepository.findById(idReactivo)
+                .orElseThrow(() -> InventoryException.reactivoNoEncontrado(idReactivo));
+
+        int total = stockRepository.totalDisponibleDe(idReactivo);
+
+        if (!reactivo.estaBajoMinimo(total)) {
+            return false;
+        }
+
+        avisarSiQuedaBajoMinimo(reactivo, requestId);
+        return true;
+    }
+
     private void avisarSiQuedaBajoMinimo(Reagent reactivo, String requestId) {
         int total = stockRepository.totalDisponibleDe(reactivo.getId());
 

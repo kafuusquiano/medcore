@@ -5,6 +5,8 @@ import com.medcore.commons.dto.PageableResponse;
 import com.medcore.commons.security.GatewayHeaders;
 import com.medcore.inventory.domain.dto.request.MovementRequest;
 import com.medcore.inventory.domain.dto.response.MovementResponse;
+import com.medcore.inventory.domain.dto.response.ConsumoPorPruebaResponse;
+import com.medcore.inventory.service.AutomaticConsumptionService;
 import com.medcore.inventory.service.MovementService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -46,9 +48,12 @@ import java.util.List;
 public class MovementController {
 
     private final MovementService movementService;
+    private final AutomaticConsumptionService consumptionService;
 
-    public MovementController(MovementService movementService) {
+    public MovementController(MovementService movementService,
+                              AutomaticConsumptionService consumptionService) {
         this.movementService = movementService;
+        this.consumptionService = consumptionService;
     }
 
     @Operation(summary = "Registra un movimiento sobre un lote",
@@ -163,4 +168,35 @@ public class MovementController {
             String codigoMuestra
     ) {
     }
+    @Operation(summary = "Reactivos que gasta una prueba del laboratorio",
+            description = "Lo que el sistema descuenta solo cada vez que se "
+                    + "registra un resultado de esa prueba. Una prueba sin "
+                    + "lineas no descuenta nada y no es un error: el examen de "
+                    + "orina se hace con tira reactiva, que no esta en el "
+                    + "catalogo de reactivos.")
+    @GetMapping("/consumo-automatico/prueba/{codigoPrueba}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LABORATORISTA')")
+    public ResponseEntity<ApiResponse<List<ConsumoPorPruebaResponse>>> consumoDePrueba(
+            @PathVariable String codigoPrueba) {
+
+        List<ConsumoPorPruebaResponse> lineas = consumptionService.consumoDe(codigoPrueba)
+                .stream()
+                .map(ConsumoPorPruebaResponse::de)
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                lineas.isEmpty()
+                        ? "La prueba " + codigoPrueba + " no declara consumo de reactivo."
+                        : lineas.size() + " reactivo(s) por determinacion.",
+                lineas));
+    }
+
+    @Operation(summary = "Pruebas que descuentan reactivo solas")
+    @GetMapping("/consumo-automatico/pruebas")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LABORATORISTA')")
+    public ResponseEntity<ApiResponse<List<String>>> pruebasConConsumo() {
+        return ResponseEntity.ok(ApiResponse.ok("Pruebas con consumo automatico.",
+                consumptionService.pruebasConConsumo()));
+    }
+
 }

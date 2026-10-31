@@ -47,5 +47,17 @@ public interface MovementLogRepository extends JpaRepository<MovementLog, Long> 
                      @Param("desde") Instant desde,
                      @Param("hasta") Instant hasta);
 
+    /**
+     * Si un resultado ya descontó reactivo.
+     *
+     * <p>Es la comprobacion de idempotencia del consumo automatico: Kafka
+     * entrega al menos una vez, y un descuento doble deja el stock del sistema
+     * por debajo del real, pidiendo reposicion de algo que hay.
+     */
+    boolean existsByIdResultado(Long idResultado);
+
+    /** Los descuentos de un resultado, para auditar que se gasto en una prueba. */
+    List<MovementLog> findByIdResultadoOrderByFechaMovimientoAsc(Long idResultado);
+
     long countByTipo(MovementType tipo);
 }
