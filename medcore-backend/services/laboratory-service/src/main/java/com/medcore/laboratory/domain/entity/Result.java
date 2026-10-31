@@ -137,6 +137,45 @@ public class Result {
         this.observaciones = observaciones;
     }
 
+    /**
+     * Anade una nota sin borrar la que ya hubiera.
+     *
+     * <p>Lo usa la deteccion de discrepancias del equipo. Reemplazar la nota
+     * perderia la que escribio el laboratorista, y una advertencia tecnica no
+     * tiene por que pisar lo que dijo una persona.
+     *
+     * <p>Si no cabe, se queda lo que ya estaba: la nota del laboratorista vale
+     * mas que la advertencia, y la advertencia tambien va al log.
+     */
+    public void anotarAdicional(String nota) {
+        if (nota == null || nota.isBlank()) {
+            return;
+        }
+
+        if (observaciones == null || observaciones.isBlank()) {
+            this.observaciones = recortar(nota);
+            return;
+        }
+
+        if (observaciones.contains(nota)) {
+            return;
+        }
+
+        String junto = observaciones + " | " + nota;
+        if (junto.length() <= MAX_OBSERVACIONES) {
+            this.observaciones = junto;
+        }
+    }
+
+    /** Tope de la columna observaciones. */
+    private static final int MAX_OBSERVACIONES = 500;
+
+    private static String recortar(String texto) {
+        return texto.length() <= MAX_OBSERVACIONES
+                ? texto
+                : texto.substring(0, MAX_OBSERVACIONES);
+    }
+
     public Long getId() {
         return id;
     }

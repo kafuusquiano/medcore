@@ -50,3 +50,38 @@ fi
 echo "Aplicando los datos de demostracion..."
 docker exec -i "$CONTENEDOR" psql -U "$USUARIO" -d postgres \
     -v ON_ERROR_STOP=1 < "$SEED"
+
+# Los horarios no se pueden sembrar con un INSERT: crear uno genera a la vez
+# los huecos de las proximas semanas, y sin huecos no se puede reservar
+# ninguna cita. Se crean por la API, que es la unica forma de que esa
+# generacion ocurra.
+RAIZ="$(cd "$(dirname "$0")/../../.." && pwd)"
+PREPARAR="$RAIZ/scripts/preparar_demo.py"
+
+if [ ! -f "$PREPARAR" ]; then
+    echo "" >&2
+    echo "No encuentro $PREPARAR; los horarios no se han creado." >&2
+    echo "Sin horarios no hay citas que reservar." >&2
+    exit 1
+fi
+
+CLAVE_ADMIN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' "$RAIZ/.env" 2>/dev/null | cut -d= -f2-)"
+
+if [ -z "$CLAVE_ADMIN" ]; then
+    echo "" >&2
+    echo "ADMIN_INITIAL_PASSWORD no esta en el .env." >&2
+    echo "Los horarios se crean por la API y hace falta entrar." >&2
+    exit 1
+fi
+
+echo ""
+echo "Creando los horarios medicos por la API..."
+
+# En Git Bash la ruta es de estilo Unix (/c/Users/...) y el python.exe de
+# Windows no la entiende. cygpath la traduce; fuera de Git Bash no existe y la
+# ruta ya vale tal cual.
+if command -v cygpath > /dev/null 2>&1; then
+    PREPARAR="$(cygpath -w "$PREPARAR")"
+fi
+
+python "$PREPARAR" "${ADMIN_DNI:-00000001}" "$CLAVE_ADMIN"

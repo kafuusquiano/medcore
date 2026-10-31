@@ -17,6 +17,20 @@ public record AttentionResponse(
         Long idPaciente,
         String dniPaciente,
         String nombrePaciente,
+
+        /*
+         * Zona, edad y sexo tal como se registraron en la atencion.
+         *
+         * Se devuelven porque son los que vale para la vigilancia
+         * epidemiologica: son una foto del dia de la atencion, no lo que diga
+         * patient-service hoy. Sin verlos no hay forma de comprobar que el
+         * dato llego, y un caso contado en la zona equivocada no se detecta
+         * mirando el informe.
+         */
+        String zonaPaciente,
+        Integer edadPaciente,
+        String sexoPaciente,
+
         Long idMedico,
         String nombreMedico,
         String motivoConsulta,

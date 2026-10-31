@@ -45,13 +45,13 @@ Arquitectura de microservicios con Spring Cloud, frontend web en React y aplicac
 | `analytics-service` | 8087 | Epidemiología, brotes | MongoDB |
 | `notification-service` | 8088 | Correo y avisos in-app | `notification_db` |
 
-Los once están implementados, con 216 pruebas. `laboratory-service` es el único que usa dos bases a la vez, y `analytics-service` el único sin Postgres: sus datos son series y agregados, no entidades relacionadas.
+Los once están implementados, con 282 pruebas. `laboratory-service` es el único que usa dos bases a la vez, y `analytics-service` el único sin Postgres: sus datos son series y agregados, no entidades relacionadas.
 
 En `notification-service`, los canales de push y SMS están declarados pero **no implementados**: Firebase necesita un proyecto con credenciales y el SMS una pasarela con contrato. Un envío por esos canales se marca como omitido con su motivo, en lugar de simular que salió.
 
 ### Tópicos Kafka
 
-Nueve tópicos, todos con productor y consumidores reales a los dos lados:
+Diez tópicos, todos con productor y consumidores reales a los dos lados:
 
 | Tópico | Productor | Consumidores |
 |---|---|---|
@@ -64,8 +64,13 @@ Nueve tópicos, todos con productor y consumidores reales a los dos lados:
 | `result.critical` | laboratory-service | analytics-service, notification-service |
 | `stock.low` | inventory-service | notification-service |
 | `stock.expired` | inventory-service | notification-service |
+| `diagnosis.registered` | medical-service | analytics-service |
 
-`notification-service` consume los nueve y no publica ninguno: es el extremo de todas las cadenas. `sample.registered` lleva dos desenlaces distinguidos por `eventType` — la muestra aceptada avisa al paciente y la rechazada al médico.
+`notification-service` consume nueve de los diez y no publica ninguno: es el extremo de todas las cadenas. `sample.registered` lleva dos desenlaces distinguidos por `eventType` — la muestra aceptada avisa al paciente y la rechazada al médico.
+
+`diagnosis.registered` es el único que `notification-service` no escucha: un diagnóstico registrado no es noticia para nadie en el momento en que se registra, porque el paciente acaba de estar delante del médico y el médico es quien lo escribió. Se publica al **finalizar** la atención, no al añadir cada diagnóstico: uno de una atención abierta todavía puede cambiar, y un caso retirado no se puede descontar de un informe que ya salió.
+
+`result.registered` lo consumen tres servicios: analytics lo cuenta, notification avisa, e inventory descuenta el reactivo que gastó la prueba. Inventory escucha ese tópico y **no** `result.critical`, porque un valor crítico se publica en los dos y escuchar ambos descontaría dos veces.
 
 Reglas que valen para todos los consumidores del sistema:
 
@@ -369,6 +374,29 @@ long contarEntre(LocalDate desde, LocalDate hasta);
 
 Las `@Aggregation` escritas a mano no tienen el problema, porque en ellas los operadores se escriben uno a uno.
 
+**7. Tras cambiar el `pom.xml` padre, reinstalarlo.** Es la misma trampa que la 5, aplicada al POM. Compilar un módulo con `-pl` resuelve el padre desde el repositorio local, no desde el archivo del disco, así que una propiedad o una versión que se acaban de añadir no existen para ese módulo.
+
+El error llega disfrazado. Al añadir `zxing` al `dependencyManagement` y compilar `medical-service`, el fallo fue `NoClassDefFoundError: LabOrderPriority` en los doce tests del servicio: una clase propia, que no tiene nada que ver con zxing. La causa real era el POM padre antiguo, que dejaba la dependencia sin versión y rompía el classpath entero.
+
+```bash
+mvn -N install                                 # solo el POM padre
+mvn install -pl shared/medcore-commons -DskipTests
+```
+
+Y una nota de Windows: `mvn clean` puede fallar con `Failed to delete target\classes\...` si OneDrive tiene la carpeta abierta. No hace falta `clean` para esto; basta recompilar.
+
+**8. En Spring Boot 4, una URL inexistente lanza `NoResourceFoundException`, no `NoHandlerFoundException`.** La segunda solo se lanza si se activa `throw-exception-if-no-handler-found`; por defecto, la petición llega al manejador de recursos estáticos y es él quien falla.
+
+Un `@ExceptionHandler` que solo declare la antigua deja que la nueva caiga en el manejador genérico de `Exception`. El resultado son dos problemas a la vez: el cliente recibe un **500 "ocurrió un error inesperado"** donde debería ver un 404, y cada petición a una ruta mal escrita deja una traza en `ERROR`, que es justo lo que esconde los fallos de verdad.
+
+```java
+// Las dos, porque cuál llega depende de la configuración
+@ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+public ResponseEntity<ApiResponse<Void>> manejarNoEncontrado(Exception ex, ...)
+```
+
+Se detectó pidiendo una ruta que el script de pruebas se había inventado: en lugar de un 404 limpio, el gateway devolvió un 500 con un identificador de incidencia. `BaseGlobalExceptionHandler` vive en `medcore-commons`, así que el fallo afectaba a los ocho servicios.
+
 ---
 
 ## 5. Entorno de desarrollo
@@ -406,7 +434,41 @@ Puntos de entrada locales:
 | Interfaz HL7 de los equipos | http://localhost:8085/api/hl7/oru |
 | Frontend | http://localhost:3000 |
 
-Al host se publican solo cuatro puertos: el 8080 del gateway, el 8085 de la interfaz HL7, y el 8090 y 8025 de las dos utilidades de desarrollo. Los demás servicios viven en la red interna de Compose y solo el gateway los alcanza (MC4).
+Al host se publican solo cuatro puertos: el 8080 del gateway, el 8085 de la interfaz HL7, y el 8090 y 8025 de las dos utilidades de desarrollo.
+
+### Datos de demostración
+
+Las migraciones de Flyway siembran lo que el sistema necesita para funcionar: los roles, el catálogo CIE-10 y el catálogo de pruebas del laboratorio. El administrador lo crea `AdminBootstrap` al arrancar `auth-service`, con el DNI `00000001` y la contraseña de `ADMIN_INITIAL_PASSWORD`.
+
+Para recorrer el circuito completo hace falta algo más: sin médicos con horario no hay citas que reservar. Eso lo trae un seed aparte, que se aplica a mano con el stack ya levantado:
+
+```bash
+bash infra/postgres/seeds/aplicar-demo.sh
+```
+
+Añade dos médicos, un laboratorista, una recepcionista y diez pacientes repartidos en cinco zonas de Lima, de siete meses a 78 años. Las zonas y las edades están repartidas a propósito: la vigilancia agrupa por distrito y por grupo de edad, y con todos los pacientes en el mismo distrito no se puede ver si el mapa de calor funciona.
+
+No va en Flyway deliberadamente. Flyway lleva el esquema y los datos de referencia; meter pacientes inventados en una migración los llevaría también a producción. El seed es idempotente, así que se puede aplicar varias veces.
+
+Las contraseñas de los usuarios de demostración están en el propio archivo y son iguales para todos. Solo sirven para una demostración en local.
+
+### Pruebas de punta a punta
+
+Dos recorridos, los dos contra el stack real:
+
+```bash
+# Por el gateway: login, alta de paciente, el correo que viaja por Kafka
+# hasta Mailpit, y una consulta a cada uno de los ocho servicios.
+python scripts/e2e_gateway.py 00000001 <contrasena>
+
+# El circuito clínico: cita, atención, diagnóstico, orden, muestra,
+# resultado crítico, aviso al médico, descuento de reactivo y vigilancia.
+python scripts/e2e_clinico.py 00000001 <contrasena>
+```
+
+El segundo necesita el seed de demostración aplicado. Los dos usan solo la biblioteca estándar de Python, sin dependencias que instalar.
+
+Son los que encuentran lo que las pruebas unitarias no pueden: que el gateway enrute de verdad, que un evento atraviese cuatro servicios y que las cabeceras lleguen al otro lado. El fallo de las rutas del gateway apareció así. Los demás servicios viven en la red interna de Compose y solo el gateway los alcanza (MC4).
 
 El 8085 es la excepción deliberada: los analizadores de laboratorio escriben la trama directamente al servicio y no saben enviar un JWT, así que esa ruta se protege por red. En producción, solo la VLAN del laboratorio debe llegar a ese puerto.
 

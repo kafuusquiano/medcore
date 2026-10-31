@@ -14,7 +14,9 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
 
@@ -97,11 +99,50 @@ public abstract class BaseGlobalExceptionHandler {
                 "No tienes permisos para realizar esta operacion.");
     }
 
-    @ExceptionHandler(NoHandlerFoundException.class)
-    public ResponseEntity<ApiResponse<Void>> manejarNoEncontrado(NoHandlerFoundException ex,
+    /**
+     * Una URL que no existe.
+     *
+     * <p>Se manejan las DOS excepciones a proposito. Spring lanza
+     * NoHandlerFoundException solo si se configura
+     * {@code throw-exception-if-no-handler-found}, y en Spring Boot 4 lo
+     * normal es que el manejador de recursos estaticos lance
+     * NoResourceFoundException en su lugar.
+     *
+     * <p>Sin la segunda, una URL mal escrita caia en el manejador generico de
+     * abajo y el cliente recibia un 500 con "ocurrio un error inesperado". Dos
+     * problemas: el frontend no puede distinguir "no existe" de "se rompio", y
+     * cada peticion a una ruta equivocada dejaba una traza en ERROR, que es
+     * justo lo que esconde los errores de verdad.
+     */
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ApiResponse<Void>> manejarNoEncontrado(Exception ex,
                                                                  HttpServletRequest request) {
+        // En DEBUG y no en ERROR: una ruta equivocada es cosa del cliente, no
+        // un fallo del servicio.
+        log.debug("Ruta no encontrada: {} {}",
+                request.getMethod(), request.getRequestURI());
+
         return respuestaSimple(request, HttpStatus.NOT_FOUND, "RECURSO_NO_ENCONTRADO",
                 "El recurso solicitado no existe.");
+    }
+
+    /**
+     * Metodo HTTP que la ruta no admite.
+     *
+     * <p>Un POST a una ruta que solo lee es un 405, no un 500: el recurso
+     * existe y el cliente puede corregirlo mirando el Allow de la respuesta.
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> manejarMetodoNoAdmitido(
+            HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+
+        log.debug("Metodo no admitido: {} {}",
+                request.getMethod(), request.getRequestURI());
+
+        return respuestaSimple(request, HttpStatus.METHOD_NOT_ALLOWED,
+                "METODO_NO_ADMITIDO",
+                "El metodo " + request.getMethod()
+                        + " no esta permitido en esta ruta.");
     }
 
     /**

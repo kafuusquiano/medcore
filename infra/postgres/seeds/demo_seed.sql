@@ -138,30 +138,71 @@ ON CONFLICT (dni) DO NOTHING;
 
 
 -- ============================================================
--- appointment_db: horarios de los dos medicos.
+-- inventory_db: lotes en el almacen.
 --
--- Los dias van como nombres de java.time.DayOfWeek separados por comas, que
--- es lo que lee la entidad.
+-- La migracion V1 siembra el CATALOGO de reactivos, que es un dato de
+-- referencia: que reactivos usa el laboratorio. Pero no siembra lotes, porque
+-- un lote es material que alguien recibio un dia concreto con un vencimiento
+-- concreto, y eso no es referencia.
 --
--- Los horarios no se solapan del todo a proposito: con dos agendas distintas
--- se puede comprobar que los huecos se calculan por medico y que ocupar uno
--- no afecta al otro.
+-- Sin lotes el almacen esta vacio, y el descuento automatico no tiene de
+-- donde descontar: cada resultado deja un WARN de stock insuficiente en el
+-- log. Es el comportamiento correcto, pero no se puede demostrar nada.
+--
+-- Dos lotes de los reactivos de hematologia a proposito, uno proximo a vencer
+-- y otro no: asi se ve que el consumo gasta primero el que vence antes, que es
+-- la regla del almacen y lo que evita tirar material.
+--
+-- Uno de los reactivos queda por debajo de su minimo a proposito, para que la
+-- alerta de reposicion tenga algo que avisar.
 -- ============================================================
-\c appointment_db
+\c inventory_db
 
-INSERT INTO doctor_schedule (id_medico, nombre_medico, especialidad,
-                             dias_disponibles, hora_inicio, hora_fin, activo)
-SELECT v.id_medico, v.nombre, v.especialidad, v.dias, v.inicio::time,
-       v.fin::time, true
+INSERT INTO stock (reagent_id, lote, cantidad_actual, cantidad_inicial,
+                   fecha_vencimiento, fecha_ingreso, ubicacion, observaciones)
+SELECT r.id, v.lote, v.cantidad, v.cantidad,
+       CURRENT_DATE + (v.dias_para_vencer || ' days')::interval,
+       CURRENT_DATE - INTERVAL '10 days',
+       v.ubicacion, v.nota
 FROM (VALUES
-    (1, 'Dr. Ricardo Vega Campos', 'Medicina interna',
-     'MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY', '08:00', '14:00'),
-    (2, 'Dra. Carmen Rojas Ibanez', 'Medicina general',
-     'MONDAY,WEDNESDAY,FRIDAY', '14:00', '20:00')
-) AS v (id_medico, nombre, especialidad, dias, inicio, fin)
+    -- Hematologia: dos lotes del mismo reactivo, con vencimientos distintos.
+    ('REA-HEM-01', 'L-HEM01-A', 40,  45, 'Refrigerador 1', 'Vence pronto: se gasta primero'),
+    ('REA-HEM-01', 'L-HEM01-B', 120, 365, 'Refrigerador 1', NULL),
+    ('REA-HEM-02', 'L-HEM02-A', 200, 200, 'Almacen general', NULL),
+    ('REA-HEM-03', 'L-HEM03-A', 150, 180, 'Almacen general', NULL),
+
+    -- Bioquimica.
+    ('REA-BIO-01', 'L-BIO01-A', 180, 240, 'Refrigerador 2', NULL),
+    ('REA-BIO-02', 'L-BIO02-A', 90,  200, 'Refrigerador 2', NULL),
+    ('REA-BIO-03', 'L-BIO03-A', 110, 300, 'Refrigerador 2', NULL),
+    -- Este queda por debajo del minimo (20): la alerta tiene que saltar.
+    ('REA-BIO-04', 'L-BIO04-A', 12,  60,  'Refrigerador 2', 'Pendiente de reposicion'),
+
+    -- Inmunologia y microbiologia.
+    ('REA-INM-01', 'L-INM01-A', 60,  120, 'Refrigerador 1', NULL),
+    ('REA-MIC-01', 'L-MIC01-A', 48,  30,  'Camara de cultivo', NULL),
+    ('REA-MIC-02', 'L-MIC02-A', 48,  30,  'Camara de cultivo', NULL),
+    ('REA-MIC-03', 'L-MIC03-A', 75,  90,  'Almacen general', NULL)
+) AS v (codigo_reactivo, lote, cantidad, dias_para_vencer, ubicacion, nota)
+JOIN reagents r ON r.codigo = v.codigo_reactivo
 WHERE NOT EXISTS (
-    SELECT 1 FROM doctor_schedule d WHERE d.id_medico = v.id_medico
+    SELECT 1 FROM stock s WHERE s.reagent_id = r.id AND s.lote = v.lote
 );
+
+
+-- ============================================================
+-- appointment_db: los horarios NO se siembran aqui.
+--
+-- Crear un horario no es insertar una fila: el servicio genera a la vez los
+-- huecos de las proximas semanas en time_slots, y sin esos huecos no se puede
+-- reservar ninguna cita. Un INSERT directo en doctor_schedule deja el horario
+-- puesto y la agenda vacia, que es peor que no tener horario: el sistema
+-- parece configurado y no lo esta.
+--
+-- Los crea scripts/preparar_demo.py llamando a la API, que es la unica forma
+-- de que la generacion de huecos ocurra. Lo lanza aplicar-demo.sh despues de
+-- este archivo.
+-- ============================================================
 
 
 -- ============================================================
@@ -174,7 +215,7 @@ WHERE NOT EXISTS (
 \echo ''
 \echo '  4 usuarios del personal (2 medicos, 1 laboratorista, 1 recepcionista)'
 \echo '  10 pacientes en 5 zonas de Lima, de 7 meses a 78 anios'
-\echo '  2 horarios medicos'
+\echo '  12 lotes de reactivo en el almacen'
 \echo ''
 \echo 'Entrar con el DNI y la contrasena Medcore2026:'
 \echo '  40111222  Dr. Ricardo Vega      MEDICO'

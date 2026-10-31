@@ -291,7 +291,86 @@ public class ResultServiceImpl implements ResultService {
         resultado.interpretar(interpretacion.interpretacion(), interpretacion.rangoReferencia());
         resultado.vincularDocumentoCrudo(idDocumento);
 
+        avisarSiLaUnidadNoCuadra(muestra, prueba, observacion, resultado, equipo);
+
         return resultado;
+    }
+
+    /**
+     * Comprueba que el equipo use la misma unidad que el catalogo.
+     *
+     * <p>El valor se compara con el rango de referencia del catalogo, que esta
+     * expresado en la unidad del catalogo. Si el equipo manda otra, el numero
+     * se interpreta en una escala que no es la suya.
+     *
+     * <p>Se detecto con una trama que mandaba leucocitos en {@code /uL} cuando
+     * el catalogo los define en {@code x10^3/uL}: el sistema leyo 8200 como
+     * 8.200.000 leucocitos y lo marco critico. El valor real era 8.2, normal.
+     *
+     * <p>No se suprime el critico ni se descarta el resultado. Suprimir un
+     * critico de verdad es peor que atender uno falso, y descartar el resultado
+     * deja al paciente sin su analitica. Lo que se hace es dejar la
+     * discrepancia escrita en el resultado y avisar en el log, para que quien
+     * reciba el critico lo revise sabiendo que la unidad no cuadra.
+     */
+    private void avisarSiLaUnidadNoCuadra(Sample muestra, TestCatalog prueba,
+                                          Hl7ParsedResult.Observacion observacion,
+                                          Result resultado, String equipo) {
+        String delCatalogo = prueba.getUnidad();
+        String delEquipo = observacion.unidad();
+
+        // Sin las dos no hay nada que comparar. Que el equipo no mande unidad
+        // es corriente y no es un problema: el catalogo la pone.
+        if (delCatalogo == null || delCatalogo.isBlank()
+                || delEquipo == null || delEquipo.isBlank()) {
+            return;
+        }
+
+        if (unidadesEquivalentes(delCatalogo, delEquipo)) {
+            return;
+        }
+
+        String aviso = "El equipo informo la unidad " + delEquipo
+                + " y el catalogo usa " + delCatalogo
+                + ": revisar la configuracion del analizador.";
+
+        resultado.anotarAdicional(aviso);
+
+        // WARN y no ERROR: el resultado es valido y se registra. Lo que hay
+        // que corregir esta en el equipo, no aqui.
+        log.warn("UNIDAD DISCREPANTE | muestra={} prueba={} valor={} | equipo={} "
+                        + "catalogo={} | interpretacion={} critico={} | analizador={}",
+                muestra.getCodigo(), prueba.getCodigo(), observacion.valorNumerico(),
+                delEquipo, delCatalogo, resultado.getInterpretacion(),
+                resultado.isCritico(), equipo);
+    }
+
+    /**
+     * Si dos unidades son la misma escrita de otra forma.
+     *
+     * <p>Los analizadores no se ponen de acuerdo en la notacion: {@code mg/dL}
+     * y {@code mg/dl}, {@code x10^3/uL} y {@code 10*3/uL}, {@code /uL} y
+     * {@code /mcL}. Comparar las cadenas tal cual llenaria el log de avisos
+     * falsos, y un aviso que salta siempre deja de leerse.
+     *
+     * <p>Solo se normaliza la FORMA de escribirlo. Una diferencia de escala,
+     * que es la que importa, sigue siendo una discrepancia.
+     */
+    private boolean unidadesEquivalentes(String a, String b) {
+        return normalizarUnidad(a).equals(normalizarUnidad(b));
+    }
+
+    private String normalizarUnidad(String unidad) {
+        String limpia = unidad.trim().toLowerCase()
+                .replace(" ", "")
+                .replace("μ", "u")      // micro griega
+                .replace("µ", "u")      // micro del juego de caracteres latino
+                .replace("mc", "u")     // mcL por uL
+                .replace("**", "^")
+                .replace("*", "^");
+
+        // 10^3 y 10e3 son la misma potencia escrita distinto.
+        return limpia.replace("10e", "10^");
     }
 
     /**

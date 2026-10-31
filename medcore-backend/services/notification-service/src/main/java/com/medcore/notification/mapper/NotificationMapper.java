@@ -34,6 +34,7 @@ public class NotificationMapper {
                 aviso.getAsunto(),
                 aviso.getMensaje(),
                 aviso.getEnlace(),
+                aviso.getReferencia(),
                 aviso.getIntentos(),
                 Math.max(0, properties.maxReintentos() - aviso.getIntentos()),
                 aviso.getMotivoFallo(),

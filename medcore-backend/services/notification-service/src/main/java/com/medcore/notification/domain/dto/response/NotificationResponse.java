@@ -33,6 +33,18 @@ public record NotificationResponse(
         String asunto,
         String mensaje,
         String enlace,
+
+        /**
+         * Hecho al que se refiere el aviso, como {@code "cita:42"}.
+         *
+         * <p>Se devuelve para que el cliente pueda agrupar los avisos de un
+         * mismo hecho: la confirmacion de una cita, su recordatorio y su
+         * anulacion llegan como tres avisos distintos y son la misma cosa.
+         *
+         * <p>Nulo en los avisos que no se refieren a nada cancelable.
+         */
+        String referencia,
+
         int intentos,
         int intentosRestantes,
         String motivoFallo,
