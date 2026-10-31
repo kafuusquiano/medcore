@@ -2655,3 +2655,247 @@ Mejoras posibles del backend, ninguna urgente:
       API: hoy se cambia por SQL
 
 ================================================================================
+
+================================================================================
+SESION 12  -  31 de octubre de 2026
+Objetivo: limpiar lo que no se usa y preparar el backend para el frontend.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LIMPIEZA: 139 ARCHIVOS BORRADOS
+--------------------------------------------------------------------------------
+
+Habia 148 archivos a 0 bytes en el repositorio. No eran inofensivos: un
+archivo vacio con nombre de componente parece implementado, y el README
+prometia diez documentos que no existian.
+
+1.1 El scaffolding del frontend y del movil, 68 archivos
+    package.json, vite.config.js, index.html, los componentes, los hooks, los
+    servicios. Todos vacios.
+
+    Un package.json vacio hace fallar npm install, y npm create vite genera su
+    propia estructura sin pisar lo que encuentra: el plan vacio estorbaba mas
+    que ayudaba. La estructura prevista queda documentada en el README, que es
+    donde no puede quedarse desactualizada en silencio.
+
+1.2 Los diez documentos de docs/
+    El README los prometia en su seccion 8 y los diez estaban vacios. Quien
+    clonara el repositorio buscaba docs/arquitectura.md y no encontraba nada.
+
+    Duplicar en un archivo aparte lo que ya esta en el README es como se
+    desincroniza la documentacion: se corrige en un sitio y no en el otro. La
+    seccion 8 dice ahora donde esta cada cosa de verdad: el README, la
+    bitacora y el Swagger.
+
+1.3 Veinte .gitkeep en carpetas con contenido
+    Su unica funcion es mantener una carpeta vacia en git. En una carpeta con
+    85 archivos no hace nada.
+
+1.4 Cuatro tests vacios
+    JwtAuthenticationFilterTest, AppointmentControllerTest,
+    AvailabilityServiceImplTest y PatientControllerTest. Surefire los contaba
+    como cero pruebas, pero su existencia aparentaba cobertura de controladores
+    que no habia.
+
+1.5 Tres clases muertas
+    ReportFilterRequest, a 0 bytes. CorsConfig, una clase vacia sin nada
+    dentro: el CORS vive en api-gateway.yml. Y LabOrderTestRepository, que
+    nadie inyecta porque LabOrderTest se gestiona por cascada desde LabOrder.
+
+    Para encontrarlas hubo que filtrar: un barrido de "clases que nadie
+    referencia" devuelve casi todo el backend, porque Spring instancia por
+    anotacion. Buscando las que NO llevan anotacion de Spring Y nadie
+    referencia quedaron tres.
+
+1.6 El Maven wrapper estaba vacio
+    mvnw, mvnw.cmd y maven-wrapper.properties a 0 bytes, y el README mandaba
+    usar ./mvnw. Ese comando no funcionaba. Generado con mvn wrapper:wrapper,
+    apuntando a Maven 3.9.11 y comprobado.
+
+1.7 Tres workflows de despliegue que no encajan
+    cd-backend.yml no tiene sentido con un backend que se publica por tunel, y
+    Vercel despliega el frontend desde su propia integracion. ci.yml, que
+    tambien estaba vacio, ahora compila y ejecuta las pruebas en cada push.
+
+
+--------------------------------------------------------------------------------
+2. RENDIMIENTO: SE MIDIO ANTES DE TOCAR NADA
+--------------------------------------------------------------------------------
+
+La peticion era reducir el tiempo de respuesta de los endpoints sin perder
+robustez. Lo primero fue medir, porque optimizar sin medir es cambiar codigo
+que funciona por codigo que quiza funciona.
+
+Veintidos endpoints, por el gateway, que es como los llamara el frontend. Doce
+repeticiones cada uno, separando la primera llamada en frio.
+
+    Resultado: 13 a 45 ms de mediana.
+
+Y luego otra vez con volumen de verdad: 20.000 pacientes, 30.000 muestras,
+90.000 resultados y 40.000 movimientos.
+
+    Resultado: 13 a 45 ms de mediana. El mismo.
+
+El volumen no movio la aguja, asi que no hay consultas N+1 ni indices que
+falten. El dato importante de la sesion es ese: no habia nada que optimizar.
+
+Por eso NO se anadio cache de aplicacion, ni pools mas grandes, ni consultas
+reescritas, ni un pool de Hikari mas generoso. Cada una de esas cosas habria
+anadido una forma nueva de fallar a cambio de nada medible. El login tarda 140
+ms y tambien se deja: lo que tarda es BCrypt, y es lento a proposito.
+
+2.1 Lo que si se hizo: comprimir
+    El backend se publica por un tunel, y ahi la red cuesta mas que la
+    consulta. Un listado de veinte pacientes bajo de 2832 a 513 bytes.
+
+    Solo por encima de 1 KB, porque por debajo comprimir cuesta mas que los
+    bytes que ahorra. Y solo si el cliente manda Accept-Encoding: es el quien
+    decide, asi que no cambia el comportamiento de nadie que no lo pida.
+
+2.2 Lo que si se hizo: cachear los catalogos
+    Spring Security pone no-cache, no-store en todas las respuestas. Para una
+    analitica eso es exactamente lo que hay que hacer: no debe quedarse en la
+    cache del navegador de un ordenador compartido.
+
+    Pero el catalogo de pruebas y el CIE-10 no son datos de nadie, y el
+    frontend los pide en casi cada pantalla. Diez minutos de cache privada,
+    con Vary por Authorization.
+
+
+--------------------------------------------------------------------------------
+3. EL ERROR DE LA SESION: DEJE DATOS CLINICOS CACHEABLES
+--------------------------------------------------------------------------------
+
+El primer intento de la cache fue un filtro en medcore-commons que modificaba
+la cadena de Spring Security de cada servicio: desactivaba el escritor global
+de cabeceras de cache y lo reponia con un matcher negado, para que siguiera
+aplicandose a todo MENOS los catalogos.
+
+Funciono al reves de lo esperado. El escritor global se desactivaba y el que
+debia reponerlo no se aplicaba, asi que /api/lab-queue y /api/samples se
+quedaron SIN no-store. Datos clinicos cacheables.
+
+Se detecto comparando las cabeceras de un catalogo con las de una ruta clinica
+despues de reconstruir, que es justo la comprobacion que el propio cambio
+hacia necesaria. El sintoma era silencioso: la respuesta funcionaba igual, los
+catalogos no tenian cache todavia, y lo unico raro era una cabecera que
+faltaba.
+
+Antes de eso hubo otro intento fallido, menos grave: el filtro escribia la
+cabecera DESPUES de chain.doFilter. Cuando el controlador ha escrito el
+cuerpo, la respuesta esta comprometida y setHeader no da error: simplemente no
+hace nada.
+
+3.1 La version que queda
+    Vive en el gateway, no en los servicios. Los servicios siguen marcando
+    todo como no cacheable, sin excepciones y sin que su configuracion de
+    seguridad se toque, y el gateway levanta esa marca en una lista corta de
+    rutas, en beforeCommit.
+
+    El reparto importa por el peor caso. Si el filtro del gateway falla o se
+    queda corto, los catalogos no se cachean y cuesta unos milisegundos. En la
+    version anterior, el peor caso era una analitica en la cache del navegador
+    de la sala de espera.
+
+    Hay una prueba que falla si alguien mete una ruta clinica en la lista, y
+    otra que comprueba que no haya patrones amplios tipo /api/**.
+
+3.2 La leccion
+    El cambio que mejora el rendimiento tocando la configuracion de seguridad
+    tiene que demostrar que no la debilita, y la demostracion no es leer el
+    codigo: es mirar las cabeceras de una ruta clinica despues de desplegar.
+
+
+--------------------------------------------------------------------------------
+4. EL CLIENTE DEL FRONTEND SE GENERA, NO SE ESCRIBE
+--------------------------------------------------------------------------------
+
+El README decia que el gateway agrega la documentacion de todos los servicios
+en un unico Swagger UI. No era verdad: el gateway no tenia springdoc, y
+/v3/api-docs/swagger-config devolvia 404.
+
+Ahora si. El gateway publica los ocho servicios con un grupo cada uno, y
+RouteConfig enruta cada /v3/api-docs/<nombre> al servicio que le corresponde,
+con dos pruebas: que cada grupo llegue a su servicio, y que esas rutas no
+pisen las de /api/**.
+
+Y esto no es comodidad. Escribiendo a mano las llamadas de los dos guiones de
+punta a punta de este repositorio me equivoque OCHO veces:
+
+  /api/medical              en lugar de  /api/medical/attentions
+  /api/schedules/{id}/slots en lugar de  /api/appointments/slots
+  /api/appointments/{id}/cancelacion     en lugar de /cancelar
+  /api/notifications/estado/OMITIDA      en lugar de ?estado=OMITIDA
+  una lista de codigos      donde iban   objetos {codigo, nombre}
+  fecha y hora              donde iba    idSlot
+  codigoOrden               donde iba    idOrden
+  'O_POSITIVO'              en lugar de  'O_POS'
+
+Ninguno lo detecta el compilador y todos aparecen cuando la pantalla no carga.
+El frontend genera su cliente desde el OpenAPI del gateway y se ahorra esa
+clase de error entera:
+
+  npx openapi-typescript http://localhost:8080/v3/api-docs/patient \\
+      -o src/services/types/patient.d.ts
+
+
+--------------------------------------------------------------------------------
+5. LA TRAMPA DE WINDOWS QUE COSTO TRES DIAGNOSTICOS
+--------------------------------------------------------------------------------
+
+mvn clean falla cuando OneDrive tiene la carpeta target abierta, asi que el
+proyecto se compila sin clean. El precio son clases viejas que Maven no
+reemplaza, y el error que producen no se parece a la causa:
+
+  No exception of type AuthException can be thrown;
+  an exception type must be a subclass of Throwable
+
+Eso aparecio en los 18 tests de auth-service despues de un cambio en
+medcore-commons. La jerarquia estaba bien, comprobada con javap:
+AuthException extends MedCoreException extends RuntimeException. Lo que
+estaba mal era el .class del disco.
+
+La receta, documentada en el README como regla MC8:
+
+  find . -type d \\( -name classes -o -name test-classes \\) -path '*/target/*' \\
+      -prune -exec rm -rf {} +
+
+
+--------------------------------------------------------------------------------
+6. ESTADO
+--------------------------------------------------------------------------------
+
+  304 pruebas unitarias verdes
+  Los dos recorridos de punta a punta en verde contra el stack de 16 contenedores
+  13 a 45 ms por endpoint, comprobado con y sin volumen
+  Respuestas comprimidas: 2832 -> 513 bytes en un listado de veinte pacientes
+  Catalogos cacheables 10 minutos; datos clinicos con no-store, comprobado
+  Swagger agregado de los ocho servicios en /swagger-ui.html
+
+El volumen de prueba se borro de las bases al terminar: quedan los 13
+pacientes de demostracion y lo que generaron los recorridos.
+
+
+--------------------------------------------------------------------------------
+7. PENDIENTE
+--------------------------------------------------------------------------------
+
+  [ ] Frontend React, generando el cliente desde el OpenAPI del gateway
+  [ ] APK para movil
+  [ ] Despliegue: ngrok para el backend y Vercel para el frontend
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+  [ ] AL FINAL: la guia del sistema que se pidio al empezar el proyecto
+
+Mejoras del backend, ninguna urgente:
+
+  [ ] Push y SMS estan declarados pero no implementados: Firebase necesita un
+      proyecto con credenciales y el SMS una pasarela con contrato
+  [ ] La discrepancia de unidad solo avisa; podria rechazar la trama de un
+      equipo que falle repetidamente, pero eso exige decidir cuantas veces
+  [ ] El catalogo de consumos por prueba se consulta pero no se edita por la
+      API: hoy se cambia por SQL
+  [ ] No hay listado global de atenciones ni de ordenes, solo por paciente y
+      por medico. Es defendible (filtrar siempre por alguien) pero un panel de
+      administracion lo querra
+
+================================================================================
