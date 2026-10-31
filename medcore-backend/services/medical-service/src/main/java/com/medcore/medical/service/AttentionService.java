@@ -22,7 +22,17 @@ public interface AttentionService {
     AttentionResponse agregarDiagnostico(Long id, DiagnosisRequest request);
 
     /** Exige al menos un diagnostico. */
-    AttentionResponse finalizar(Long id);
+    /**
+     * Cierra la atencion y publica sus diagnosticos.
+     *
+     * <p>Es aqui y no al anadir cada diagnostico donde se publica
+     * diagnosis.registered: uno de una atencion abierta todavia puede cambiar,
+     * y un caso retirado no se puede descontar de un informe que ya salio.
+     *
+     * @param requestId el de la peticion, para poder seguir el rastro de un
+     *                  caso desde la consulta hasta el informe epidemiologico
+     */
+    AttentionResponse finalizar(Long id, String requestId);
 
     AttentionResponse anular(Long id, String motivo);
 

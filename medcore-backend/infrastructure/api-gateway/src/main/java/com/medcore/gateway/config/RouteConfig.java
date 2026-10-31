@@ -59,7 +59,7 @@ public class RouteConfig {
 
                 .route("analytics-service", r -> r
                         .path("/api/reports/**", "/api/trends/**",
-                                "/api/epidemiology/**")
+                                "/api/epidemiology/**", "/api/surveillance/**")
                         .uri("lb://analytics-service"))
 
                 .route("notification-service", r -> r

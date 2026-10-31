@@ -54,7 +54,7 @@ class RouteConfigTest {
             "inventory-service", List.of("/api/reagents/bajo-minimo", "/api/stock/1",
                     "/api/movements/1"),
             "analytics-service", List.of("/api/reports", "/api/trends/serie",
-                    "/api/epidemiology/heatmap"),
+                    "/api/epidemiology/heatmap", "/api/surveillance/morbilidad"),
             "notification-service", List.of("/api/notifications/resumen"));
 
     /**

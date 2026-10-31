@@ -137,6 +137,23 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- Etiquetas con QR e informes en PDF. medcore-commons las declara
+         optional, asi que quien use QrCodeUtil o PdfUtil tiene que pedirlas
+         aqui: si no, el fallo aparece al arrancar con NoClassDefFoundError y
+         no al compilar. -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>

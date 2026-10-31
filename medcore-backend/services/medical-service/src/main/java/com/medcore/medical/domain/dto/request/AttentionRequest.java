@@ -25,6 +25,24 @@ public record AttentionRequest(
 
         String correoPaciente,
 
+        /*
+         * Zona, edad y sexo del paciente: los pide la vigilancia
+         * epidemiologica, que agrupa los diagnosticos por distrito y por grupo
+         * de edad. Van en la peticion y no se consultan a patient-service para
+         * que una atencion se pueda abrir aunque ese servicio este caido: en
+         * urgencias eso no es negociable.
+         *
+         * Opcionales a proposito. Un dato que no se conoce se queda nulo, y el
+         * informe cuenta el caso en "sin registrar", que es la verdad.
+         */
+        @Size(max = 80, message = "La zona no puede superar los 80 caracteres")
+        String zonaPaciente,
+
+        Integer edadPaciente,
+
+        @Size(max = 10, message = "El sexo no puede superar los 10 caracteres")
+        String sexoPaciente,
+
         @NotNull(message = "El medico es obligatorio")
         Long idMedico,
 

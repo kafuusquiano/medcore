@@ -65,6 +65,32 @@
       <artifactId>mapstruct</artifactId>
     </dependency>
 
+
+    <!-- Para QrCodeUtil y PdfUtil. Van optional a proposito: solo
+         laboratory-service genera etiquetas e informes, y sin esto los ocho
+         servicios cargarian los JAR sin usarlos. Quien las use las declara. -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.github.librepdf</groupId>
+      <artifactId>openpdf</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
   </dependencies>
 
   <build>

@@ -1,6 +1,7 @@
 package com.medcore.medical.controller;
 
 import com.medcore.commons.dto.ApiResponse;
+import com.medcore.commons.security.GatewayHeaders;
 import com.medcore.commons.dto.PageableResponse;
 import com.medcore.medical.domain.dto.request.AttentionRequest;
 import com.medcore.medical.domain.dto.request.AttentionUpdateRequest;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -92,9 +94,12 @@ public class AttentionController {
                     """)
     @PatchMapping("/{id}/finalizar")
     @PreAuthorize("hasAnyRole('ADMIN', 'MEDICO')")
-    public ResponseEntity<ApiResponse<AttentionResponse>> finalizar(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<AttentionResponse>> finalizar(
+            @PathVariable Long id,
+            @RequestHeader(value = GatewayHeaders.REQUEST_ID, required = false)
+            String requestId) {
         return ResponseEntity.ok(ApiResponse.ok("Atencion finalizada correctamente.",
-                attentionService.finalizar(id)));
+                attentionService.finalizar(id, requestId)));
     }
 
     @Operation(summary = "Anula la atencion",

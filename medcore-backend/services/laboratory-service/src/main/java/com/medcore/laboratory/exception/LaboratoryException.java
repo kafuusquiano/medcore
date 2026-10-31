@@ -63,6 +63,19 @@ public class LaboratoryException extends MedCoreException {
                         + " y solo se pueden registrar resultados mientras esta EN_PROCESO.");
     }
 
+    /**
+     * La muestra no esta en condiciones de tener informe.
+     *
+     * <p>Una muestra EN_PROCESO tiene resultados a medias, y un informe con la
+     * mitad de las pruebas parece completo: quien lo lea no puede saber que
+     * faltan valores. Una RECHAZADA no tiene informe, tiene motivo de rechazo.
+     */
+    public static LaboratoryException muestraSinInforme(String codigo, String estado) {
+        return new LaboratoryException("MUESTRA_SIN_INFORME", HttpStatus.CONFLICT,
+                "La muestra " + codigo + " esta " + estado
+                        + " y el informe solo se emite de una muestra PROCESADA.");
+    }
+
     public static LaboratoryException motivoRechazoRequerido() {
         return new LaboratoryException("MOTIVO_RECHAZO_REQUERIDO", HttpStatus.BAD_REQUEST,
                 "Indique por que se rechaza la muestra: el medico necesita "

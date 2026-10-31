@@ -6,6 +6,7 @@ import com.medcore.commons.security.GatewayHeaders;
 import com.medcore.laboratory.domain.dto.request.SampleRequest;
 import com.medcore.laboratory.domain.dto.response.SampleResponse;
 import com.medcore.laboratory.domain.enums.SampleStatus;
+import com.medcore.laboratory.service.LabDocumentService;
 import com.medcore.laboratory.service.SampleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,7 +15,9 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,8 +44,11 @@ import java.util.List;
 public class SampleController {
 
     private final SampleService sampleService;
+    private final LabDocumentService labDocumentService;
 
-    public SampleController(SampleService sampleService) {
+    public SampleController(SampleService sampleService,
+                            LabDocumentService labDocumentService) {
+        this.labDocumentService = labDocumentService;
         this.sampleService = sampleService;
     }
 
@@ -127,6 +133,45 @@ public class SampleController {
 
         return ResponseEntity.ok(ApiResponse.ok("Muestra encontrada.",
                 sampleService.obtenerPorCodigo(codigo)));
+    }
+
+    @Operation(summary = "Etiqueta de la muestra, en PNG, con el QR del codigo",
+            description = "La pega el laboratorista en el tubo. El tecnico "
+                    + "escanea en lugar de teclear: un digito mal teclado en un "
+                    + "codigo de muestra adjunta el resultado al paciente "
+                    + "equivocado.")
+    @GetMapping(value = "/{id}/etiqueta", produces = MediaType.IMAGE_PNG_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'LABORATORISTA')")
+    public ResponseEntity<byte[]> etiqueta(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "300") int lado) {
+
+        byte[] png = labDocumentService.etiquetaPng(id, lado);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                // inline y no attachment: la etiqueta se ve en pantalla antes
+                // de imprimirla, para comprobar que es la muestra correcta.
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=etiqueta.png")
+                .body(png);
+    }
+
+    @Operation(summary = "Informe de resultados de la muestra, en PDF",
+            description = "Solo de una muestra PROCESADA: una en proceso tiene "
+                    + "resultados a medias, y un informe con la mitad de las "
+                    + "pruebas parece completo. Lo puede pedir tambien el "
+                    + "paciente, que es quien se lo lleva.")
+    @GetMapping(value = "/{id}/informe", produces = MediaType.APPLICATION_PDF_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'MEDICO', 'LABORATORISTA', 'PACIENTE')")
+    public ResponseEntity<byte[]> informe(@PathVariable Long id) {
+
+        byte[] pdf = labDocumentService.informePdf(id);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=informe-" + id + ".pdf")
+                .body(pdf);
     }
 
     @Operation(summary = "Cola de trabajo del laboratorio",

@@ -8,6 +8,7 @@ import com.medcore.medical.domain.dto.response.AttentionResponse;
 import com.medcore.medical.domain.entity.Cie10Code;
 import com.medcore.medical.domain.entity.Diagnosis;
 import com.medcore.medical.domain.entity.MedicalAttention;
+import com.medcore.medical.event.producer.DiagnosisEventProducer;
 import com.medcore.medical.exception.MedicalException;
 import com.medcore.medical.mapper.AttentionMapper;
 import com.medcore.medical.repository.Cie10CodeRepository;
@@ -18,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class AttentionServiceImpl implements AttentionService {
@@ -27,13 +30,16 @@ public class AttentionServiceImpl implements AttentionService {
     private final MedicalAttentionRepository attentionRepository;
     private final Cie10CodeRepository cie10Repository;
     private final AttentionMapper mapper;
+    private final DiagnosisEventProducer diagnosisEventProducer;
 
     public AttentionServiceImpl(MedicalAttentionRepository attentionRepository,
                                 Cie10CodeRepository cie10Repository,
-                                AttentionMapper mapper) {
+                                AttentionMapper mapper,
+                                DiagnosisEventProducer diagnosisEventProducer) {
         this.attentionRepository = attentionRepository;
         this.cie10Repository = cie10Repository;
         this.mapper = mapper;
+        this.diagnosisEventProducer = diagnosisEventProducer;
     }
 
     @Override
@@ -51,6 +57,8 @@ public class AttentionServiceImpl implements AttentionService {
         MedicalAttention atencion = new MedicalAttention(
                 request.idCita(), request.idPaciente(), request.dniPaciente(),
                 request.nombrePaciente(), request.correoPaciente(),
+                request.zonaPaciente(), request.edadPaciente(),
+                request.sexoPaciente(),
                 request.idMedico(), request.nombreMedico(), request.motivoConsulta());
 
         MedicalAttention guardada = attentionRepository.save(atencion);
@@ -122,7 +130,7 @@ public class AttentionServiceImpl implements AttentionService {
 
     @Override
     @Transactional
-    public AttentionResponse finalizar(Long id) {
+    public AttentionResponse finalizar(Long id, String requestId) {
         MedicalAttention atencion = buscarConDiagnosticos(id);
 
         if (atencion.getDiagnosticos().isEmpty()) {
@@ -135,7 +143,29 @@ public class AttentionServiceImpl implements AttentionService {
         log.info("Atencion {} finalizada con {} diagnosticos",
                 id, atencion.getDiagnosticos().size());
 
-        return mapper.aRespuesta(attentionRepository.save(atencion));
+        MedicalAttention guardada = attentionRepository.save(atencion);
+
+        // Despues del commit, no dentro: anunciar casos de una atencion que un
+        // rollback posterior deja sin cerrar mete en la estadistica casos que
+        // no existen, y de un informe que ya salio no se descuentan.
+        trasCommit(() -> diagnosisEventProducer
+                .publicarDeAtencionFinalizada(guardada, requestId));
+
+        return mapper.aRespuesta(guardada);
+    }
+
+    private void trasCommit(Runnable accion) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            accion.run();
+                        }
+                    });
+        } else {
+            accion.run();
+        }
     }
 
     @Override

@@ -3,7 +3,7 @@ package com.medcore.commons.kafka;
 import java.util.List;
 
 /**
- * Nombres de los nueve topicos Kafka del sistema.
+ * Nombres de los diez topicos Kafka del sistema.
  *
  * <p>Productores y consumidores referencian estas constantes en lugar de
  * literales, para que un cambio de nombre no deje a un consumidor escuchando
@@ -40,7 +40,15 @@ public final class KafkaTopics {
     /** Produce inventory-service. Consume notification-service. */
     public static final String STOCK_EXPIRED = "stock.expired";
 
-    /** Los nueve topicos, en el mismo orden que create-topics.sh. */
+    /**
+     * Produce medical-service. Consume analytics-service.
+     *
+     * <p>No lo consume notification-service: un diagnostico registrado no es
+     * noticia para nadie en el momento en que se registra.
+     */
+    public static final String DIAGNOSIS_REGISTERED = "diagnosis.registered";
+
+    /** Los diez topicos, en el mismo orden que create-topics.sh. */
     public static final List<String> TODOS = List.of(
             PATIENT_CREATED,
             APPOINTMENT_CREATED,
@@ -50,7 +58,8 @@ public final class KafkaTopics {
             RESULT_REGISTERED,
             RESULT_CRITICAL,
             STOCK_LOW,
-            STOCK_EXPIRED
+            STOCK_EXPIRED,
+            DIAGNOSIS_REGISTERED
     );
 
     private KafkaTopics() {

@@ -58,12 +58,15 @@ class OutbreakDetectionServiceImplTest {
     @Mock
     private OutbreakAlertRepository alertRepository;
 
+    @Mock
+    private com.medcore.analytics.repository.DiagnosisRecordRepository diagnosisRepository;
+
     private OutbreakDetectionServiceImpl detectionService;
 
     @BeforeEach
     void prepararServicio() {
         detectionService = new OutbreakDetectionServiceImpl(
-                recordRepository, alertRepository,
+                recordRepository, alertRepository, diagnosisRepository,
                 new AnalyticsProperties(
                         new AnalyticsProperties.Brote(UMBRAL, VENTANA), "0 0 * * * *"));
 

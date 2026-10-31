@@ -59,6 +59,28 @@ public class MedicalAttention {
     @Column(name = "id_medico", nullable = false)
     private Long idMedico;
 
+    /**
+     * Zona, edad y sexo del paciente el dia de la atencion.
+     *
+     * <p>Son una foto, igual que el dni y el nombre de arriba, y por el mismo
+     * motivo reforzado: la vigilancia epidemiologica agrupa por zona y por
+     * grupo de edad, y un caso tiene que seguir contando donde y cuando
+     * ocurrio. Si el paciente se muda o cumple anios, el informe del anio
+     * pasado no debe cambiar.
+     *
+     * <p>Nulos en las atenciones registradas antes de la migracion V4, y
+     * cuando el dato no se conoce: inventarlos repartiria casos a ciegas entre
+     * zonas y grupos de edad.
+     */
+    @Column(name = "zona_paciente", length = 80)
+    private String zonaPaciente;
+
+    @Column(name = "edad_paciente")
+    private Integer edadPaciente;
+
+    @Column(name = "sexo_paciente", length = 10)
+    private String sexoPaciente;
+
     @Column(name = "nombre_medico", nullable = false, length = 120)
     private String nombreMedico;
 
@@ -135,12 +157,17 @@ public class MedicalAttention {
 
     public MedicalAttention(Long idCita, Long idPaciente, String dniPaciente,
                             String nombrePaciente, String correoPaciente,
-                            Long idMedico, String nombreMedico, String motivoConsulta) {
+                            String zonaPaciente, Integer edadPaciente,
+                            String sexoPaciente, Long idMedico,
+                            String nombreMedico, String motivoConsulta) {
         this.idCita = idCita;
         this.idPaciente = idPaciente;
         this.dniPaciente = dniPaciente;
         this.nombrePaciente = nombrePaciente;
         this.correoPaciente = correoPaciente;
+        this.zonaPaciente = zonaPaciente;
+        this.edadPaciente = edadPaciente;
+        this.sexoPaciente = sexoPaciente;
         this.idMedico = idMedico;
         this.nombreMedico = nombreMedico;
         this.motivoConsulta = motivoConsulta;
@@ -268,6 +295,18 @@ public class MedicalAttention {
 
     public Long getIdMedico() {
         return idMedico;
+    }
+
+    public String getZonaPaciente() {
+        return zonaPaciente;
+    }
+
+    public Integer getEdadPaciente() {
+        return edadPaciente;
+    }
+
+    public String getSexoPaciente() {
+        return sexoPaciente;
     }
 
     public String getNombreMedico() {

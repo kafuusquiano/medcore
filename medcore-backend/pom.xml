@@ -53,6 +53,11 @@
     <springdoc.version>2.8.13</springdoc.version>
     <jjwt.version>0.12.6</jjwt.version>
     <hapi-hl7.version>2.6.0</hapi-hl7.version>
+    <!-- Codigos QR de las etiquetas de muestra e informes en PDF. Van
+         declaradas optional en medcore-commons, para que los servicios que no
+         las usan no arrastren los JAR. -->
+    <zxing.version>3.5.3</zxing.version>
+    <openpdf.version>2.0.3</openpdf.version>
   </properties>
 
   <dependencyManagement>
@@ -104,6 +109,22 @@
         <scope>runtime</scope>
       </dependency>
 
+      <!-- Codigos QR y PDF, usados solo por laboratory-service. -->
+      <dependency>
+        <groupId>com.google.zxing</groupId>
+        <artifactId>core</artifactId>
+        <version>${zxing.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.google.zxing</groupId>
+        <artifactId>javase</artifactId>
+        <version>${zxing.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.github.librepdf</groupId>
+        <artifactId>openpdf</artifactId>
+        <version>${openpdf.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 

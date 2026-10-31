@@ -72,10 +72,11 @@ analytics.epidemiological_records.createIndex(
     { idResultado: 1 },
     { unique: true, name: 'idResultado' });
 
-// Los indices siguen a los campos que analytics recibe de verdad. Se vigila
-// por PRUEBA de laboratorio anormal y no por codigo CIE-10, porque
-// medical-service todavia no publica ningun evento de diagnostico. Cuando lo
-// haga, se anade codigoCie10 al documento y sus indices aqui.
+// Los indices siguen a los campos que analytics recibe de verdad. Esta
+// coleccion vigila por PRUEBA de laboratorio anormal; la vigilancia por codigo
+// CIE-10 vive en diagnosis_records, mas abajo, porque son dos fuentes con
+// campos distintos: un diagnostico no tiene valor numerico ni unidad ni
+// prueba, y un resultado no tiene codigo CIE-10.
 analytics.epidemiological_records.createIndex({ zona: 1, fecha: -1 });
 analytics.epidemiological_records.createIndex({ codigoPrueba: 1, fecha: -1 });
 // El indice de la deteccion de brotes: casos de una prueba, en una zona,
@@ -85,6 +86,42 @@ analytics.epidemiological_records.createIndex(
     { anormal: 1, zona: 1, codigoPrueba: 1, fecha: -1 },
     { name: 'deteccion_brotes' });
 
+// ---------- diagnosis_records ----------
+//
+// La otra mitad de la vigilancia: los diagnosticos CIE-10 que registra el
+// medico. Antes de esto, un brote de una enfermedad que se diagnostica por
+// clinica y no por analitica era invisible.
+//
+// Coleccion aparte y no un campo mas en epidemiological_records: son dos
+// fuentes con campos distintos, y meterlas juntas dejaria la mitad nulos en
+// cada caso y obligaria a distinguirlas por un campo de tipo en cada consulta.
+try {
+    analytics.createCollection('diagnosis_records');
+} catch (e) {
+    print('diagnosis_records ya existia: ' + e.codeName);
+}
+
+// El _id es el id del diagnostico en medical_db, asi que la idempotencia la da
+// la clave primaria y no hace falta un indice unico aparte: un reenvio de
+// Kafka encuentra el documento y no lo duplica.
+
+analytics.diagnosis_records.createIndex({ zona: 1, fecha: -1 });
+analytics.diagnosis_records.createIndex({ codigoCie10: 1, fecha: -1 });
+analytics.diagnosis_records.createIndex({ grupoEdad: 1, fecha: -1 });
+
+// El indice de la deteccion de brotes clinicos: casos de un codigo, en una
+// zona, dentro de una ventana de dias.
+analytics.diagnosis_records.createIndex(
+    { zona: 1, codigoCie10: 1, fecha: -1 },
+    { name: 'deteccion_brotes_clinicos' });
+
+// Las de notificacion obligatoria se consultan solas, para mandarlas al
+// MINSA. Indice PARCIAL: son una fraccion minima de los diagnosticos.
+analytics.diagnosis_records.createIndex(
+    { fecha: -1 },
+    { name: 'notificables',
+      partialFilterExpression: { notificable: true } });
+
 try {
     analytics.createCollection('outbreak_alerts');
 } catch (e) {
@@ -92,10 +129,15 @@ try {
 }
 analytics.outbreak_alerts.createIndex({ zona: 1, fechaDeteccion: -1 });
 analytics.outbreak_alerts.createIndex({ estado: 1, nivelRiesgo: -1 });
-// Una sola alerta ABIERTA por zona y prueba. Indice PARCIAL: al cerrarla,
-// si el brote reaparece se puede abrir otra. Sin esto, cada caso nuevo del
-// mismo brote abriria una alerta y el panel acabaria con veinte avisos del
-// mismo hecho.
+// Una sola alerta ABIERTA por zona y codigo. Indice PARCIAL: al cerrarla, si
+// el brote reaparece se puede abrir otra. Sin esto, cada caso nuevo del mismo
+// brote abriria una alerta y el panel acabaria con veinte avisos del mismo
+// hecho.
+//
+// La clave no incluye la fuente porque los dos espacios de codigos no se
+// solapan: los del catalogo del laboratorio son HEM-001 y similares, y los
+// CIE-10 son A09 o J11. El campo codigoPrueba lleva uno u otro segun la
+// fuente de la alerta.
 analytics.outbreak_alerts.createIndex(
     { zona: 1, codigoPrueba: 1 },
     { unique: true, name: 'alerta_abierta',

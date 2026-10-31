@@ -45,6 +45,27 @@ public interface OutbreakDetectionService {
      * <p>El motivo es obligatorio: una alerta cerrada sin explicacion no sirve
      * para revisar despues si el umbral estaba bien puesto.
      */
+    /**
+     * Barrido de brotes por codigo CIE-10, sobre los diagnosticos.
+     *
+     * <p>Es la otra mitad de la vigilancia: {@link #detectar} solo ve lo que
+     * pasa por el laboratorio, asi que una enfermedad que se diagnostica por
+     * clinica y no por analitica no aparecia por ningun sitio.
+     *
+     * <p>Las alertas van a la misma coleccion y se distinguen por su fuente:
+     * un epidemiologo quiere ver las dos juntas, no en dos pantallas.
+     */
+    List<OutbreakAlert> detectarClinicos(String requestId);
+
+    /**
+     * Evalua una zona y un codigo CIE-10 concretos.
+     *
+     * <p>Se llama al registrar cada diagnostico, en lugar de esperar al
+     * barrido: un brote detectado doce horas despues sirve de poco.
+     */
+    List<OutbreakAlert> evaluarDiagnostico(String zona, String codigoCie10,
+                                           String requestId);
+
     OutbreakAlert resolver(String id, AlertStatus desenlace, String usuario, String motivo);
 
     List<OutbreakAlert> alertasAbiertas();

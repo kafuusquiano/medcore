@@ -27,6 +27,7 @@ TOPICS=(
   result.critical
   stock.low
   stock.expired
+  diagnosis.registered
 )
 
 echo "Esperando a que Kafka responda en ${BOOTSTRAP}..."

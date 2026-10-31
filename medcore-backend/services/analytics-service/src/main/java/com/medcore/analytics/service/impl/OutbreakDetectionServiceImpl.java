@@ -2,12 +2,15 @@ package com.medcore.analytics.service.impl;
 
 import com.medcore.analytics.config.AnalyticsProperties;
 import com.medcore.analytics.domain.document.AnalyticsRecord;
+import com.medcore.analytics.domain.document.DiagnosisRecord;
 import com.medcore.analytics.domain.document.OutbreakAlert;
 import com.medcore.analytics.domain.enums.AlertStatus;
 import com.medcore.analytics.domain.enums.RiskLevel;
 import com.medcore.analytics.exception.AnalyticsException;
 import com.medcore.analytics.repository.AnalyticsRecordRepository;
+import com.medcore.analytics.repository.DiagnosisRecordRepository;
 import com.medcore.analytics.repository.OutbreakAlertRepository;
+import com.medcore.analytics.repository.projection.ConteoPorZonaYCie10;
 import com.medcore.analytics.repository.projection.ConteoPorZonaYPrueba;
 import com.medcore.analytics.service.OutbreakDetectionService;
 import org.slf4j.Logger;
@@ -31,12 +34,15 @@ public class OutbreakDetectionServiceImpl implements OutbreakDetectionService {
     private final AnalyticsRecordRepository recordRepository;
     private final OutbreakAlertRepository alertRepository;
     private final AnalyticsProperties properties;
+    private final DiagnosisRecordRepository diagnosisRepository;
 
     public OutbreakDetectionServiceImpl(AnalyticsRecordRepository recordRepository,
                                         OutbreakAlertRepository alertRepository,
+                                        DiagnosisRecordRepository diagnosisRepository,
                                         AnalyticsProperties properties) {
         this.recordRepository = recordRepository;
         this.alertRepository = alertRepository;
+        this.diagnosisRepository = diagnosisRepository;
         this.properties = properties;
     }
 
@@ -121,6 +127,144 @@ public class OutbreakDetectionServiceImpl implements OutbreakDetectionService {
         return abrirOActualizar(conteo, umbral, ventana, requestId)
                 .map(List::of)
                 .orElseGet(List::of);
+    }
+
+    @Override
+    public List<OutbreakAlert> detectarClinicos(String requestId) {
+        int umbral = properties.umbralCasos();
+        int ventana = properties.ventanaDias();
+
+        LocalDate hasta = LocalDate.now();
+        LocalDate desde = hasta.minusDays(ventana - 1L);
+
+        // Una sola agregacion devuelve los grupos de zona y codigo que llegan
+        // al umbral. Preguntar zona por zona exigiria una consulta por cada
+        // combinacion, y hay cientos.
+        List<ConteoPorZonaYCie10> candidatos =
+                diagnosisRepository.casosPorZonaYCie10(desde, hasta, umbral);
+
+        List<OutbreakAlert> novedades = candidatos.stream()
+                .map(candidato -> abrirOActualizarClinica(
+                        candidato, umbral, ventana, requestId))
+                .flatMap(Optional::stream)
+                .toList();
+
+        if (novedades.isEmpty()) {
+            log.debug("Barrido de brotes clinicos sin novedades: umbral {} casos "
+                    + "en {} dias [{}]", umbral, ventana, requestId);
+        }
+
+        return novedades;
+    }
+
+    @Override
+    public List<OutbreakAlert> evaluarDiagnostico(String zona, String codigoCie10,
+                                                  String requestId) {
+        int umbral = properties.umbralCasos();
+        int ventana = properties.ventanaDias();
+
+        LocalDate hasta = LocalDate.now();
+        LocalDate desde = hasta.minusDays(ventana - 1L);
+
+        List<DiagnosisRecord> casos = diagnosisRepository.casosDe(
+                zona, codigoCie10, desde, hasta);
+
+        // Pacientes distintos, no diagnosticos: un paciente que vuelve a
+        // consulta por lo mismo genera otro diagnostico, y contarlo dos veces
+        // inventaria la mitad de un brote.
+        Set<String> pacientes = new TreeSet<>();
+        casos.forEach(caso -> pacientes.add(caso.dniPaciente()));
+
+        if (pacientes.size() < umbral) {
+            return List.of();
+        }
+
+        long notificables = casos.stream().filter(DiagnosisRecord::notificable).count();
+        LocalDate primero = casos.stream().map(DiagnosisRecord::fecha)
+                .min(Comparator.naturalOrder()).orElse(desde);
+        LocalDate ultimo = casos.stream().map(DiagnosisRecord::fecha)
+                .max(Comparator.naturalOrder()).orElse(hasta);
+
+        ConteoPorZonaYCie10 conteo = new ConteoPorZonaYCie10(
+                zona,
+                codigoCie10,
+                casos.isEmpty() ? codigoCie10 : casos.get(0).descripcionCie10(),
+                pacientes.size(),
+                (int) notificables,
+                List.copyOf(pacientes),
+                primero,
+                ultimo);
+
+        return abrirOActualizarClinica(conteo, umbral, ventana, requestId)
+                .map(List::of)
+                .orElseGet(List::of);
+    }
+
+    /**
+     * Abre la alerta clinica, o actualiza la que siga abierta.
+     *
+     * <p>Mientras una alerta del mismo brote siga abierta, los casos nuevos
+     * actualizan sus cifras en lugar de abrir otra: diez alertas del mismo
+     * brote no son mas informacion, son ruido.
+     */
+    private Optional<OutbreakAlert> abrirOActualizarClinica(
+            ConteoPorZonaYCie10 conteo, int umbral, int ventana, String requestId) {
+
+        Optional<OutbreakAlert> abierta = alertRepository
+                .findByZonaAndCodigoPruebaAndEstado(
+                        conteo.zona(), conteo.codigoCie10(), AlertStatus.ABIERTA);
+
+        if (abierta.isPresent()) {
+            OutbreakAlert actual = abierta.get();
+
+            if (actual.casos() == conteo.casos()
+                    && actual.casosCriticos() == conteo.notificables()) {
+                return Optional.empty();
+            }
+
+            OutbreakAlert actualizada = alertRepository.save(actual.actualizar(
+                    conteo.casos(), conteo.notificables(), conteo.dnisSeguros(),
+                    conteo.primerCaso(), conteo.ultimoCaso()));
+
+            log.info("Alerta clinica de {} / {} actualizada: {} -> {} casos, "
+                            + "riesgo {} [{}]",
+                    conteo.zona(), conteo.codigoCie10(), actual.casos(),
+                    actualizada.casos(), actualizada.nivelRiesgo(), requestId);
+
+            return Optional.of(actualizada);
+        }
+
+        OutbreakAlert nueva = OutbreakAlert.abrirPorDiagnostico(
+                conteo.zona(), conteo.codigoCie10(), conteo.descripcionCie10(),
+                conteo.casos(), conteo.notificables(), umbral, ventana,
+                conteo.dnisSeguros(), conteo.primerCaso(), conteo.ultimoCaso());
+
+        try {
+            OutbreakAlert guardada = alertRepository.save(nueva);
+
+            if (guardada.nivelRiesgo().exigeAvisoInmediato()) {
+                log.warn("POSIBLE BROTE CLINICO | zona={} cie10={} ({}) casos={} "
+                                + "(umbral {}) notificables={} ventana={} dias "
+                                + "| riesgo ALTO [{}]",
+                        guardada.zona(), guardada.codigoPrueba(),
+                        guardada.nombrePrueba(), guardada.casos(), umbral,
+                        guardada.casosCriticos(), ventana, requestId);
+            } else {
+                log.info("Alerta de brote clinico abierta | zona={} cie10={} "
+                                + "casos={} riesgo={} [{}]",
+                        guardada.zona(), guardada.codigoPrueba(),
+                        guardada.casos(), guardada.nivelRiesgo(), requestId);
+            }
+
+            return Optional.of(guardada);
+
+        } catch (DuplicateKeyException e) {
+            // El indice unico parcial rechazo la insercion: otra ejecucion
+            // abrio la alerta del mismo brote a la vez. No es un error.
+            log.debug("La alerta clinica de {} / {} la abrio otra ejecucion [{}]",
+                    conteo.zona(), conteo.codigoCie10(), requestId);
+            return Optional.empty();
+        }
     }
 
     @Override

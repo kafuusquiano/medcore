@@ -56,7 +56,8 @@ class LabOrderServiceImplTest {
                 eventProducer, new LabOrderMapper());
 
         atencion = new MedicalAttention(10L, 2L, "12345678", "Ana Torres",
-                "ana@correo.com", 77L, "Dr. Vega", "Dolor de garganta");
+                "ana@correo.com", "Comas", 34, "FEMENINO",
+                77L, "Dr. Vega", "Dolor de garganta");
         ReflectionTestUtils.setField(atencion, "id", 1L);
 
         when(attentionRepository.findById(1L)).thenReturn(Optional.of(atencion));
