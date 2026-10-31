@@ -74,6 +74,15 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- Agrega la documentacion de los ocho servicios en un unico Swagger
+         UI. Es lo que permite generar el cliente del frontend desde una sola
+         fuente en lugar de escribir a mano cien endpoints: de los ocho que
+         escribi yo a mano en los guiones de prueba, me equivoque en ocho. -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+    </dependency>
+
   </dependencies>
 
   <build>

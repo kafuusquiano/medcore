@@ -1,0 +1,94 @@
+# Compila el backend y ejecuta las pruebas en cada push y cada Pull Request.
+#
+# No despliega nada. El backend corre en el equipo de desarrollo y se publica
+# por un tunel, asi que no hay servidor al que desplegar; el frontend lo
+# despliega Vercel desde su propia integracion con el repositorio.
+#
+# Lo que este CI evita es concreto: que entre en main un commit que no compila
+# o que rompe una prueba. Las 294 pruebas tardan menos de dos minutos y no
+# necesitan Docker, porque ninguna levanta infraestructura: las que hablan con
+# Postgres, Mongo o Kafka son los dos recorridos de punta a punta de scripts/,
+# que se ejecutan a mano contra el stack local.
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Si se empuja dos veces seguidas, la ejecucion anterior se cancela: gastar
+# minutos en validar un commit que ya quedo atras no sirve de nada.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Java 21)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          # Guarda ~/.m2 entre ejecuciones. Sin esto, cada push vuelve a
+          # descargar Spring Boot entero y el CI tarda cinco minutos en lugar
+          # de uno.
+          cache: maven
+
+      - name: Compilar y probar
+        working-directory: medcore-backend
+        # -B: sin colores ni barras de progreso, que en un log de CI solo
+        # anaden ruido.
+        run: ./mvnw -B verify
+
+      - name: Resumen de las pruebas
+        if: always()
+        working-directory: medcore-backend
+        run: |
+          echo "### Pruebas" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -h "tests=" --include='*.xml' -r . 2>/dev/null \
+            | grep -oE 'name="[^"]+" tests="[0-9]+" [^>]*failures="[0-9]+"' \
+            | head -20 >> "$GITHUB_STEP_SUMMARY" || echo "sin informes" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar los informes si algo fallo
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: medcore-backend/**/target/surefire-reports/
+          retention-days: 7
+
+  imagenes:
+    name: Las imagenes se construyen
+    runs-on: ubuntu-latest
+    # Solo si las pruebas pasaron: construir imagenes de codigo roto es gastar
+    # minutos para nada.
+    needs: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Comprobar el compose
+        run: docker compose config --quiet
+
+      # Se construye una sola imagen y no las once. El Dockerfile es el mismo
+      # patron en todas, asi que si una se construye las demas tambien, y
+      # construir once tarda quince minutos en un runner compartido.
+      - name: Construir una imagen de muestra
+        run: docker compose build laboratory-service
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          MONGO_USER: ci
+          MONGO_PASSWORD: ci
+          JWT_SECRET: clave-solo-para-que-el-compose-valide-no-se-usa
+          ADMIN_INITIAL_PASSWORD: no-se-usa

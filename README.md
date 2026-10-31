@@ -97,7 +97,6 @@ medcore/
 │   ├── mongo/init/
 │   ├── kafka/
 │   └── config-repo/              # configuración que sirve el Config Server
-├── docs/
 ├── docker-compose.yml            # stack completo
 ├── docker-compose.infra.yml      # solo bases de datos + Kafka
 ├── .env.example
@@ -145,7 +144,9 @@ Nunca se escriben credenciales en el código: se leen de variables de entorno o 
 Toda clase de servicio tiene su test unitario con JUnit 5 y Mockito. Nombrado: `metodoBajoTest_escenario_resultadoEsperado()`, por ejemplo `registrarResultado_valorCritico_publicaEventoResultCritical()`.
 
 ### G7 — Documentación de la API
-Todo controller lleva anotaciones de Springdoc OpenAPI: `@Tag` en la clase, `@Operation` y `@ApiResponse` en cada endpoint. El gateway agrega la documentación de todos los servicios en un único Swagger UI.
+Todo controller lleva anotaciones de Springdoc OpenAPI: `@Tag` en la clase, `@Operation` y `@ApiResponse` en cada endpoint.
+
+El gateway agrega la documentación de los ocho servicios en un único Swagger UI, con un grupo por servicio. No es solo comodidad: es la fuente de la que se genera el cliente del frontend, y un endpoint sin anotar sale del generador sin tipos y sin descripción.
 
 ---
 
@@ -383,7 +384,21 @@ mvn -N install                                 # solo el POM padre
 mvn install -pl shared/medcore-commons -DskipTests
 ```
 
-Y una nota de Windows: `mvn clean` puede fallar con `Failed to delete target\classes\...` si OneDrive tiene la carpeta abierta. No hace falta `clean` para esto; basta recompilar.
+**Y la trampa de Windows que va con esto.** `mvn clean` falla con `Failed to delete target\classes\...` cuando OneDrive tiene la carpeta abierta, así que el proyecto se compila sin `clean`. El precio es que a veces quedan clases viejas que Maven no reemplaza, y el error que producen no se parece en nada a la causa:
+
+```
+No exception of type AuthException can be thrown;
+an exception type must be a subclass of Throwable
+```
+
+Eso salió en los 18 tests de `auth-service` después de un cambio en `medcore-commons`. `AuthException extends MedCoreException extends RuntimeException`, verificado con `javap`: la jerarquía estaba bien y el código era correcto. Lo que estaba mal era el `.class` del disco.
+
+Cuando un error no tenga sentido con el código que se está leyendo, antes de buscar más:
+
+```bash
+# Borra las clases de todos los módulos sin usar mvn clean
+find . -type d \( -name classes -o -name test-classes \) -path '*/target/*'     -prune -exec rm -rf {} +
+```
 
 **8. En Spring Boot 4, una URL inexistente lanza `NoResourceFoundException`, no `NoHandlerFoundException`.** La segunda solo se lanza si se activa `throw-exception-if-no-handler-found`; por defecto, la petición llega al manejador de recursos estáticos y es él quien falla.
 
@@ -468,7 +483,31 @@ python scripts/e2e_clinico.py 00000001 <contrasena>
 
 El segundo necesita el seed de demostración aplicado. Los dos usan solo la biblioteca estándar de Python, sin dependencias que instalar.
 
-Son los que encuentran lo que las pruebas unitarias no pueden: que el gateway enrute de verdad, que un evento atraviese cuatro servicios y que las cabeceras lleguen al otro lado. El fallo de las rutas del gateway apareció así. Los demás servicios viven en la red interna de Compose y solo el gateway los alcanza (MC4).
+Son los que encuentran lo que las pruebas unitarias no pueden: que el gateway enrute de verdad, que un evento atraviese cuatro servicios y que las cabeceras lleguen al otro lado. El fallo de las rutas del gateway apareció así.
+
+### Rendimiento: lo que se midió y lo que se hizo
+
+Antes de optimizar nada se midió, con el stack levantado y por el gateway, que es como lo llamará el frontend. Y luego otra vez con **20.000 pacientes, 30.000 muestras, 90.000 resultados y 40.000 movimientos** cargados.
+
+Las dos medidas dieron lo mismo: **13 a 45 ms de mediana** en los veintidós endpoints que el frontend usará más. El volumen no movió la aguja, así que no hay consultas N+1 ni índices que falten.
+
+Por eso aquí no se ha añadido caché de aplicación, ni pools más grandes, ni consultas reescritas: no hay nada que arreglar, y cada una de esas cosas habría añadido una forma nueva de fallar a cambio de nada medible. El login tarda 140 ms y también se deja como está: lo que tarda es BCrypt, y es lento a propósito.
+
+Lo que sí se hizo son las dos cosas que el túnel vuelve rentables, porque con él la red cuesta más que la consulta:
+
+- **Compresión de las respuestas.** Un listado de veinte pacientes son 2,8 KB de JSON que comprimidos bajan a menos de 1 KB. Solo se comprime por encima de 1 KB, porque por debajo comprimir cuesta más que los bytes que ahorra, y solo si el cliente manda `Accept-Encoding`: es él quien decide.
+- **Caché de los catálogos, y solo de los catálogos.** Spring Security pone `no-store` en todo, que para una analítica es exactamente lo que hay que hacer. Pero el catálogo de pruebas y el CIE-10 no son datos de nadie, y el frontend los pide en casi cada pantalla. `ReferenceDataCacheFilter` les pone diez minutos de caché privada; la lista de rutas se mantiene a mano y corta, y hay una prueba que falla si alguien mete ahí una ruta con datos de paciente.
+
+### El cliente del frontend se genera, no se escribe
+
+El gateway publica la documentación de los ocho servicios en `/swagger-ui.html`, con un grupo por servicio en `/v3/api-docs/<nombre>`.
+
+De ahí sale el cliente del frontend. Y no es una comodidad: escribiendo a mano las llamadas de los guiones de prueba de este repositorio me equivoqué ocho veces en rutas y en campos de DTO (`/api/medical` en lugar de `/api/medical/attentions`, una lista de códigos donde iban objetos, `fecha` y `hora` donde iba `idSlot`). Ninguno de esos errores lo detecta el compilador, y todos aparecen cuando la pantalla no carga.
+
+```bash
+# Un cliente TypeScript con tipos, desde el OpenAPI del gateway
+npx openapi-typescript http://localhost:8080/v3/api-docs/patient     -o src/services/types/patient.d.ts
+``` Los demás servicios viven en la red interna de Compose y solo el gateway los alcanza (MC4).
 
 El 8085 es la excepción deliberada: los analizadores de laboratorio escriben la trama directamente al servicio y no saben enviar un JWT, así que esa ruta se protege por red. En producción, solo la VLAN del laboratorio debe llegar a ese puerto.
 
@@ -509,18 +548,17 @@ Orden al montar una demostración: levantar el stack, verificar los contenedores
 
 ## 8. Documentación
 
-| Documento | Contenido |
+Todo está en este archivo y en dos sitios más:
+
+| Dónde | Qué |
 |---|---|
-| `docs/arquitectura.md` | Diagramas y decisiones de arquitectura |
-| `docs/microservicios.md` | Detalle de cada servicio |
-| `docs/kafka-topics.md` | Contratos de los eventos |
-| `docs/roles-permisos.md` | Matriz de roles y permisos |
-| `docs/flujos.md` | Flujos de negocio extremo a extremo |
-| `docs/hl7.md` | Integración HL7 y ASTM |
-| `docs/api-reference.md` | Referencia de endpoints |
-| `docs/deploy-local.md` | Levantar el entorno local |
-| `docs/deploy-cloud.md` | Despliegue híbrido con túnel y Vercel |
-| `docs/variables-entorno.md` | Catálogo de variables |
+| Este README | Arquitectura, servicios, tópicos, convenciones G1–G7 y reglas MC1–MC8 |
+| `BITACORA.txt` | Diario de sesiones: qué se construyó, qué falló y por qué se decidió cada cosa |
+| `/swagger-ui.html` | Referencia de los endpoints, generada del código y por tanto siempre al día |
+
+No hay una carpeta `docs/` con documentos aparte, y es deliberado. Había diez archivos ahí, vacíos, que el README prometía: duplicar en `docs/arquitectura.md` lo que ya está escrito aquí es como se desincroniza la documentación, porque se corrige en un sitio y no en el otro.
+
+Las decisiones que no caben en un comentario de código están en `BITACORA.txt`, fechadas y con el motivo. Lo que sí cabe está en el código, al lado de lo que explica.
 
 ---
 

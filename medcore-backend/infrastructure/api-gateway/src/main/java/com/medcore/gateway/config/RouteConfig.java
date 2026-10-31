@@ -66,6 +66,55 @@ public class RouteConfig {
                         .path("/api/notifications/**")
                         .uri("lb://notification-service"))
 
+                // ----------------------------------------------------
+                // Documentacion: cada grupo del Swagger agregado apunta a
+                // /v3/api-docs/<nombre>, y aqui se reescribe al /v3/api-docs
+                // que expone cada servicio.
+                //
+                // Van al final a proposito: /v3/api-docs/** no puede
+                // adelantarse a las rutas de /api/**, y asi se lee el orden
+                // de un vistazo.
+                // ----------------------------------------------------
+                .route("docs-auth", r -> r
+                        .path("/v3/api-docs/auth")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://auth-service"))
+
+                .route("docs-patient", r -> r
+                        .path("/v3/api-docs/patient")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://patient-service"))
+
+                .route("docs-appointment", r -> r
+                        .path("/v3/api-docs/appointment")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://appointment-service"))
+
+                .route("docs-medical", r -> r
+                        .path("/v3/api-docs/medical")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://medical-service"))
+
+                .route("docs-laboratory", r -> r
+                        .path("/v3/api-docs/laboratory")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://laboratory-service"))
+
+                .route("docs-inventory", r -> r
+                        .path("/v3/api-docs/inventory")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://inventory-service"))
+
+                .route("docs-analytics", r -> r
+                        .path("/v3/api-docs/analytics")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://analytics-service"))
+
+                .route("docs-notification", r -> r
+                        .path("/v3/api-docs/notification")
+                        .filters(f -> f.setPath("/v3/api-docs"))
+                        .uri("lb://notification-service"))
+
                 .build();
     }
 }

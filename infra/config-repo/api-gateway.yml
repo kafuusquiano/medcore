@@ -54,3 +54,43 @@ gateway:
     - /v3/api-docs/**
     - /swagger-ui/**
     - /swagger-ui.html
+
+# ------------------------------------------------------------
+# Documentacion agregada de los ocho servicios.
+#
+# Un solo Swagger UI en /swagger-ui.html con un desplegable por servicio, en
+# lugar de ocho direcciones distintas que hay que recordar.
+#
+# Y es la base para generar el cliente del frontend: cada grupo expone su
+# OpenAPI en /v3/api-docs/<nombre>, y de ahi sale el codigo de las llamadas
+# sin escribirlas a mano. Escribir a mano cien endpoints es como se cuelan los
+# errores de ruta y de DTO, que no se ven hasta que la pantalla no carga.
+#
+# Las URL son internas de la red de Compose (nombre:puerto). El gateway las
+# consulta por su cuenta, asi que el navegador nunca habla con un servicio
+# directamente.
+# ------------------------------------------------------------
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    # Sin esto el desplegable sale con los grupos en el orden de descubrimiento
+    # de Eureka, que cambia en cada arranque.
+    disable-swagger-default-url: true
+    urls-primary-name: auth-service
+    urls:
+      - name: auth-service
+        url: /v3/api-docs/auth
+      - name: patient-service
+        url: /v3/api-docs/patient
+      - name: appointment-service
+        url: /v3/api-docs/appointment
+      - name: medical-service
+        url: /v3/api-docs/medical
+      - name: laboratory-service
+        url: /v3/api-docs/laboratory
+      - name: inventory-service
+        url: /v3/api-docs/inventory
+      - name: analytics-service
+        url: /v3/api-docs/analytics
+      - name: notification-service
+        url: /v3/api-docs/notification

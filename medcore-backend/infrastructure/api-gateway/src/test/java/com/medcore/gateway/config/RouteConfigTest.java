@@ -75,6 +75,11 @@ class RouteConfigTest {
                 ApplicationConversionService::getSharedInstance);
         ctx.registerBean(ConfigurationService.class);
         ctx.registerBean(PathRoutePredicateFactory.class);
+        // Las rutas de documentacion usan setPath para reescribir la ruta
+        // antes de reenviarla, asi que su factoria tambien tiene que estar.
+        ctx.registerBean(
+                org.springframework.cloud.gateway.filter.factory
+                        .SetPathGatewayFilterFactory.class);
         ctx.refresh();
 
         return new RouteConfig().rutas(new RouteLocatorBuilder(ctx));
@@ -88,6 +93,39 @@ class RouteConfigTest {
                         assertThat(servicioQueAtiende(camino))
                                 .as("la ruta %s deberia ir a %s", camino, servicio)
                                 .isEqualTo(servicio)));
+    }
+
+    @Test
+    @DisplayName("Cada grupo de documentacion llega a su servicio")
+    void cadaGrupoDeDocumentacionLlegaASuServicio() {
+        // El Swagger agregado apunta a estas rutas, y de ellas sale el cliente
+        // del frontend: si una enruta al servicio equivocado, el cliente se
+        // genera con los endpoints de otro.
+        Map<String, String> docs = Map.of(
+                "/v3/api-docs/auth", "docs-auth",
+                "/v3/api-docs/patient", "docs-patient",
+                "/v3/api-docs/appointment", "docs-appointment",
+                "/v3/api-docs/medical", "docs-medical",
+                "/v3/api-docs/laboratory", "docs-laboratory",
+                "/v3/api-docs/inventory", "docs-inventory",
+                "/v3/api-docs/analytics", "docs-analytics",
+                "/v3/api-docs/notification", "docs-notification");
+
+        docs.forEach((camino, ruta) ->
+                assertThat(servicioQueAtiende(camino))
+                        .as("la ruta %s deberia ir a %s", camino, ruta)
+                        .isEqualTo(ruta));
+    }
+
+    @Test
+    @DisplayName("Las rutas de documentacion no pisan las de la API")
+    void lasRutasDeDocumentacionNoPisanLasDeLaApi() {
+        // /v3/api-docs/patient y /api/patients empiezan distinto, pero un
+        // patron mal escrito podria solaparlos y entonces el frontend
+        // recibiria documentacion donde espera datos.
+        assertThat(servicioQueAtiende("/api/patients/1")).isEqualTo("patient-service");
+        assertThat(servicioQueAtiende("/api/lab-catalog/areas"))
+                .isEqualTo("laboratory-service");
     }
 
     @Test

@@ -1,3 +1,38 @@
+# ------------------------------------------------------------
+# Compresion de las respuestas.
+#
+# El backend corre en el equipo de desarrollo y se publica por un tunel, asi
+# que lo que de verdad tarda no es generar la respuesta (20 a 45 ms medidos)
+# sino mandarla por la red. Un listado de veinte pacientes son unos 3 KB de
+# JSON que comprimidos bajan a menos de 1 KB.
+#
+# min-response-size evita comprimir lo pequeno: por debajo de 1 KB el tiempo
+# de comprimir y descomprimir cuesta mas que los bytes que ahorra.
+#
+# No afecta a la robustez: si el cliente no manda Accept-Encoding, la
+# respuesta sale en claro. Es el cliente quien decide.
+# ------------------------------------------------------------
+server:
+  compression:
+    enabled: true
+    min-response-size: 1KB
+    mime-types:
+      - application/json
+      - application/xml
+      - text/plain
+      - text/html
+      - text/css
+      - application/javascript
+  # Cierra las conexiones ociosas antes que el tunel, que las corta a los 60
+  # segundos. Una conexion que el cliente cree viva y el tunel ya cerro
+  # produce un error que parece del servidor.
+  tomcat:
+    connection-timeout: 20s
+    keep-alive-timeout: 30s
+    threads:
+      max: 50
+      min-spare: 10
+
 # ============================================================
 # Configuracion COMUN a todos los microservicios de MedCore.
 # La sirve el config-server; cada servicio la recibe antes que
