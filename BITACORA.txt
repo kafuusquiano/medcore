@@ -2349,3 +2349,309 @@ no dice nada de las rutas.
   [ ] AL FINAL: la guia del sistema que se pidio al empezar el proyecto
 
 ================================================================================
+
+================================================================================
+SESION 11  -  31 de octubre de 2026
+Objetivo: cerrar los pendientes del backend y probar el circuito clinico.
+================================================================================
+
+--------------------------------------------------------------------------------
+1. LA VIGILANCIA POR CODIGO CIE-10: EL HUECO MAS GRANDE QUE QUEDABA
+--------------------------------------------------------------------------------
+
+La vigilancia epidemiologica solo veia lo que pasaba por el laboratorio. Un
+brote de una enfermedad que se diagnostica por clinica y no por analitica era
+invisible, y eso deja fuera buena parte de lo que de verdad se vigila.
+
+medical-service publica ahora diagnosis.registered, el decimo topico.
+
+Se publica al FINALIZAR la atencion y no al anadir cada diagnostico. Un
+diagnostico de una atencion abierta todavia puede cambiar: el medico lo quita,
+cambia el principal o anade otro. Publicarlo antes haria que la vigilancia
+contara casos que luego se corrigen, y un caso retirado no se puede descontar
+de un informe que ya salio.
+
+Un evento por diagnostico y no uno con la lista: analytics cuenta casos por
+codigo, y un evento con varios le obligaria a desgranarlo y a inventarse una
+clave de idempotencia por cada parte.
+
+1.1 La migracion V4 de medical_db
+    Anade al snapshot de la atencion la zona, la edad y el sexo del paciente.
+    Son una foto, igual que el dni y el nombre que ya se guardaban, y por el
+    mismo motivo reforzado:
+
+      - La edad cambia. Un caso de 2026 en un paciente que hoy tiene 40 se
+        conto cuando tenia 38, y el grupo de edad del informe de 2026 no debe
+        moverse porque el paciente cumpla anios.
+      - La zona cambia. Un paciente que se muda no traslada su caso al nuevo
+        distrito: el brote ocurrio donde vivia entonces.
+
+    Van en la peticion y no se consultan a patient-service para que una
+    atencion se pueda abrir aunque ese servicio este caido. En urgencias eso no
+    es negociable.
+
+1.2 diagnosis_records, coleccion aparte
+    No es un campo mas en epidemiological_records. Son dos fuentes con campos
+    distintos: un diagnostico no tiene valor numerico ni unidad ni prueba, y un
+    resultado no tiene codigo CIE-10. Juntas dejarian la mitad de los campos
+    nulos en cada caso y obligarian a distinguirlas por un campo de tipo en
+    cada consulta.
+
+    Las dos no se suman en un mismo recuento: el mismo paciente puede tener un
+    resultado anormal y un diagnostico del mismo episodio, y sumarlos contaria
+    dos veces un solo caso.
+
+    El _id del documento es el id del diagnostico en medical_db, asi que la
+    idempotencia la da la clave primaria y no hace falta un indice unico
+    aparte.
+
+1.3 Agrupacion por grupo de edad
+    Con las franjas del MINSA, que no son tramos iguales: el menor de cinco
+    anios y el mayor de sesenta concentran la mortalidad, y meterlos en tramos
+    de diez los diluye.
+
+    Las enfermedades de notificacion obligatoria se consultan solas y salen en
+    WARN con un solo caso, porque no esperan ningun umbral: hay que mandarlas
+    al MINSA el mismo dia.
+
+1.4 Las alertas de brote llevan fuente
+    LABORATORIO o DIAGNOSTICO, y las dos clases van a la misma coleccion: un
+    epidemiologo quiere verlas juntas, no en dos pantallas. Las guardadas antes
+    tienen la fuente nula y se leen como de LABORATORIO, que es lo que eran.
+
+
+--------------------------------------------------------------------------------
+2. EL ALMACEN SE DESCUENTA SOLO
+--------------------------------------------------------------------------------
+
+Hasta ahora el consumo de reactivo habia que apuntarlo a mano, asi que el stock
+del sistema se separaba del real en cuanto alguien se olvidaba, y la alerta de
+reposicion llegaba tarde o no llegaba.
+
+Se dispara con result.registered: un resultado registrado es una determinacion
+hecha, y una determinacion hecha es reactivo gastado.
+
+2.1 Por evento y no por Feign
+    Era la decision que quedaba pendiente. Con una llamada sincrona, un
+    inventory-service caido bloquearia el procesamiento de las muestras, y eso
+    en un laboratorio no es negociable. Con el evento, los mensajes esperan en
+    Kafka y el laboratorio sigue trabajando.
+
+    Escucha result.registered y NO result.critical: un valor critico se publica
+    en los dos topicos, y escuchar los dos descontaria el reactivo dos veces.
+    La idempotencia lo atraparia, pero depender de ella para algo evitable es
+    pedir problemas.
+
+2.2 La migracion V3 de inventory_db
+    La tabla que faltaba: que reactivos gasta cada prueba. Sembrada con las
+    doce del catalogo actual. El recuento leucocitario gasta diluyente y
+    lisante; un urocultivo, dos placas y una tira de identificacion.
+
+    El examen completo de orina no aparece: se hace con tira reactiva, que no
+    esta en el catalogo de reactivos. Una prueba sin linea no descuenta nada y
+    no es un error.
+
+2.3 La idempotencia va en el log de movimientos
+    Una columna id_resultado con indice unico parcial, en lugar de una tabla
+    aparte de eventos procesados: asi la comprobacion y el hecho no pueden
+    separarse. Un descuento doble dejaria el stock por debajo del real,
+    pidiendo reposicion de algo que hay.
+
+2.4 El consumo automatico NO exige que alcance el total
+    A diferencia del manual. La prueba ya se hizo y el reactivo ya se gasto:
+    negarse a apuntarlo porque el sistema cree que no habia no arregla el
+    almacen, solo esconde el descuadre. Se descuenta hasta donde alcanza y el
+    faltante queda en WARN para quien lleva el almacen.
+
+
+--------------------------------------------------------------------------------
+3. LAS TRES UTILIDADES DE COMMONS, QUE ESTABAN COMO ARCHIVOS VACIOS
+--------------------------------------------------------------------------------
+
+3.1 DateUtil
+    Centraliza los patrones que estaban repetidos en cinco servicios:
+    yyyyMMddHHmmss tres veces, yyyyMMdd dos. Un patron HL7 copiado mal en un
+    sitio produce una trama que el analizador rechaza sin decir por que.
+
+    Lee la precision variable que admite el estandar: un equipo puede mandar
+    20261031, 2026103114, 202610311430 o los catorce digitos, y rechazar las
+    formas cortas deja sin leer resultados que son validos.
+
+    La edad se calcula a una FECHA dada, no solo a hoy: el rango de referencia
+    que vale para un analisis es el de la edad que tenia el paciente cuando se
+    le tomo la muestra.
+
+    Los meses en palabras van escritos a mano y no por Locale: el JDK del
+    contenedor puede no traer los datos de la configuracion regional, y
+    entonces un informe clinico saldria con el mes en ingles.
+
+3.2 QrCodeUtil
+    Correccion de errores alta, que recupera el contenido con hasta el 30 % del
+    codigo danado. Es lo que corresponde: una etiqueta de laboratorio se moja,
+    se roza con el guante y se pega sobre un tubo curvo.
+
+3.3 PdfUtil
+    Ofrece las piezas y no los documentos. Quien sabe que lleva un informe de
+    laboratorio es laboratory-service, y meter el dominio clinico en commons
+    obligaria a tocarlo cada vez que cambie un informe.
+
+    Las dependencias de zxing y openpdf van optional en commons y declaradas en
+    laboratory-service, que es el unico que las usa: si no, los ocho servicios
+    cargarian los JAR sin usarlos.
+
+3.4 Dos endpoints nuevos en laboratory
+    La etiqueta de la muestra con su QR, que el tecnico escanea en lugar de
+    teclear: un digito mal teclado en un codigo de muestra adjunta el resultado
+    al paciente equivocado, que es el error mas grave de un laboratorio.
+
+    Y el informe en PDF, solo de una muestra PROCESADA: uno con la mitad de las
+    pruebas parece completo, y quien lo lea no puede saber que faltan valores.
+
+
+--------------------------------------------------------------------------------
+4. EL RECORRIDO CLINICO DE PUNTA A PUNTA
+--------------------------------------------------------------------------------
+
+scripts/e2e_clinico.py recorre la cadena larga, la que atraviesa cinco
+servicios y cuatro topicos:
+
+  cita -> atencion -> diagnostico -> orden de laboratorio -> muestra ->
+  resultado critico -> aviso al medico -> descuento de reactivo ->
+  vigilancia epidemiologica
+
+Comprueba 32 cosas, incluidas las que tienen que FALLAR: que el mismo hueco no
+se reserve dos veces, que el mismo codigo CIE-10 no se repita en una atencion,
+que una muestra sin procesar no tenga informe.
+
+Escrito con la biblioteca estandar de Python, sin dependencias que instalar.
+
+
+--------------------------------------------------------------------------------
+5. LO QUE ENCONTRO, QUE NINGUNA PRUEBA UNITARIA PODIA VER
+--------------------------------------------------------------------------------
+
+5.1 Una URL inexistente devolvia 500, no 404
+    Fallo real, y en medcore-commons, asi que afectaba a los ocho servicios.
+
+    En Spring Boot 4 una ruta que no existe lanza NoResourceFoundException, no
+    NoHandlerFoundException: la segunda solo se lanza si se activa
+    throw-exception-if-no-handler-found, y por defecto la peticion llega al
+    manejador de recursos estaticos.
+
+    BaseGlobalExceptionHandler solo declaraba la antigua, asi que la nueva caia
+    en el manejador generico de Exception. Dos problemas a la vez: el cliente
+    recibia un 500 "ocurrio un error inesperado" donde debia ver un 404, y cada
+    peticion a una ruta mal escrita dejaba una traza en ERROR, que es justo lo
+    que esconde los fallos de verdad.
+
+    Lo encontro el recorrido pidiendo una ruta que el script se habia
+    inventado. Corregido, con las dos excepciones declaradas, el 405 para el
+    metodo no admitido, y las dos en DEBUG en lugar de ERROR: una ruta
+    equivocada es cosa del cliente, no un fallo del servicio.
+
+5.2 El seed sembraba horarios que no servian para nada
+    Crear un horario no es insertar una fila: el servicio genera a la vez los
+    huecos de las proximas semanas en time_slots, y sin esos huecos no se puede
+    reservar ninguna cita.
+
+    El seed insertaba en doctor_schedule por SQL y dejaba la agenda vacia, que
+    es peor que no tener horario: el sistema parece configurado y no lo esta.
+    En la base habia 2 horarios y 0 huecos.
+
+    Los horarios los crea ahora scripts/preparar_demo.py llamando a la API, que
+    es la unica forma de que la generacion ocurra. Tras el arreglo: 2 horarios
+    y 384 huecos.
+
+5.3 El almacen estaba vacio
+    La migracion V1 de inventory siembra el CATALOGO de reactivos, que es un
+    dato de referencia. Pero no lotes, porque un lote es material que alguien
+    recibio un dia concreto con un vencimiento concreto.
+
+    Sin lotes, el descuento automatico no tenia de donde descontar: cada
+    resultado dejaba un WARN de stock insuficiente. El comportamiento era
+    correcto, pero no se podia demostrar nada. El seed trae ahora doce lotes,
+    uno de ellos por debajo de su minimo a proposito para que la alerta de
+    reposicion tenga algo que avisar.
+
+5.4 Nadie comprobaba la unidad del equipo
+    El hallazgo mas interesante de la sesion, y vino de un error mio.
+
+    La trama de prueba mandaba leucocitos en /uL cuando el catalogo los define
+    en x10^3/uL. El sistema leyo 8200 como 8.200.000 leucocitos y lo marco
+    CRITICO_ALTO. Tenia razon: en la unidad del catalogo ese valor es critico.
+    Pero el valor de verdad era 8.2, que es normal.
+
+    Un equipo mal configurado produce asi criticos falsos. Y un critico falso
+    hace que alguien llame al medico de madrugada por nada; repetido, hace que
+    se dejen de atender los avisos, que es como se pierde uno de verdad.
+
+    El remedio NO es suprimir el critico: suprimir uno de verdad es peor que
+    atender uno falso. Lo que se hace es registrar la discrepancia, dejarla
+    escrita en el resultado y avisar en WARN, para que quien reciba el critico
+    lo revise sabiendo que la unidad no cuadra.
+
+    La comparacion normaliza la FORMA de escribir la unidad (mg/dL y mg/dl,
+    x10^3/uL y 10*3/uL, /uL y /mcL), porque los analizadores no se ponen de
+    acuerdo en la notacion y un aviso que salta siempre deja de leerse. Una
+    diferencia de ESCALA, que es la que importa, sigue siendo discrepancia.
+
+5.5 La respuesta de la atencion no devolvia la zona
+    La guardaba y no la devolvia. Sin verla no hay forma de comprobar que el
+    dato llego, y un caso contado en la zona equivocada no se detecta mirando
+    el informe. Igual con el campo referencia de los avisos, que es lo que
+    permite agrupar la confirmacion, el recordatorio y la anulacion de una
+    misma cita.
+
+5.6 El pom padre tambien hay que reinstalarlo
+    Es la misma trampa que la de medcore-commons, aplicada al POM. Compilar con
+    -pl resuelve el padre desde el repositorio local, no desde el disco.
+
+    El error llega disfrazado: al anadir zxing al dependencyManagement y
+    compilar medical-service, el fallo fue NoClassDefFoundError sobre
+    LabOrderPriority, una clase propia que no tiene nada que ver con zxing. La
+    causa real era el POM padre antiguo, que dejaba la dependencia sin version
+    y rompia el classpath entero.
+
+
+--------------------------------------------------------------------------------
+6. EL BACKEND, TERMINADO
+--------------------------------------------------------------------------------
+
+  11 servicios, 294 pruebas unitarias verdes
+  10 topicos de Kafka, todos con productor y consumidores reales
+  19 rutas publicadas por el gateway, todas con controlador detras
+  2 recorridos de punta a punta contra el stack real
+
+Los dos recorridos:
+
+  python scripts/e2e_gateway.py 00000001 <contrasena>
+  python scripts/e2e_clinico.py 00000001 <contrasena>
+
+El segundo necesita el seed aplicado:
+
+  bash infra/postgres/seeds/aplicar-demo.sh
+
+
+--------------------------------------------------------------------------------
+7. PENDIENTE
+--------------------------------------------------------------------------------
+
+Del backend no queda nada bloqueante. Lo que viene es otra cosa:
+
+  [ ] Frontend React
+  [ ] APK para movil
+  [ ] Despliegue: ngrok para el backend y Vercel para el frontend
+  [ ] Reservar el dominio estatico en dashboard.ngrok.com
+  [ ] AL FINAL: la guia del sistema que se pidio al empezar el proyecto
+
+Mejoras posibles del backend, ninguna urgente:
+
+  [ ] Los canales de push y SMS estan declarados pero no implementados:
+      Firebase necesita un proyecto con credenciales y el SMS una pasarela con
+      contrato. Hoy un envio por esos canales se marca omitido con su motivo
+  [ ] La discrepancia de unidad solo avisa; podria rechazar la trama de un
+      equipo que falle repetidamente, pero eso exige decidir cuantas veces
+  [ ] El catalogo de consumos por prueba se consulta pero no se edita por la
+      API: hoy se cambia por SQL
+
+================================================================================
